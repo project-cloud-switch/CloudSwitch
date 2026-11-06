@@ -32,7 +32,7 @@ Doctor publishes `DeploymentHealthChanged` on persisted transitions between `Unk
 
 Doctor makes this decision directly; Worker does not consume `DeploymentHealthChanged` to create another request. API and Doctor share the same durable job/request rules.
 
-API stores monitoring settings in shared PostgreSQL and reads health/job progress directly. An event such as `DeploymentMonitoringConfigurationChanged` is proposed for configuration updates, but its schema and replica delivery are [under discussion](discussions/doctor-configuration.md). It is not implemented or part of the agreed queue topology.
+API stores monitoring settings in shared PostgreSQL and reads health/job progress directly. Direct Doctor reads with revision checks are the proposed Sprint 2 option, while the initial delivery/restart approach is [under discussion](discussions/doctor-configuration.md). `DeploymentMonitoringConfigurationChanged` is neither implemented nor an agreed queue/message contract.
 
 Monitoring implementations remain planned in [#14](https://github.com/project-cloud-switch/CloudSwitch/issues/14). **The full migration request and progress schema is also still pending.**
 
@@ -43,6 +43,8 @@ The request must capture:
 - Source deployment and target provider/configuration.
 - Pinned image, port/resources, application configuration and secret references.
 - Approved HCL module/revision, target health policy and traffic-cutover configuration.
+
+The source in MVP is **Yandex Serverless Containers only**: source identity should include folder ID, container ID and direct HTTPS endpoint (revision ID optional). No generic source resource-type support should be implied. See [MVP review decisions](mvp-review-decisions.md).
 
 Keep `DeploymentRequested` as the common request for API and Doctor; extend its snapshot for migration with the service owners. Progress events must include the migration phase, safe target endpoint and failure/cutover outcome. These are requirements, not finalized field names.
 
