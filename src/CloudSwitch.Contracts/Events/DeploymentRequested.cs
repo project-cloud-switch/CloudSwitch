@@ -11,4 +11,11 @@ public sealed record DeploymentRequested
     public required Guid DeploymentId { get; init; }
     public required Guid UserId { get; init; }
     public required DeploymentSpecification Specification { get; init; }
+
+    /// <summary>Identifies whether this job was requested manually or automatically by Doctor.</summary>
+    public DeploymentTrigger Trigger { get; init; } = DeploymentTrigger.Manual;
+
+    /// <summary>Incident identifier when triggered automatically by Doctor.</summary>
+    public Guid? IncidentId { get; init; }
 }
+

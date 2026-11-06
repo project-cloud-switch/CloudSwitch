@@ -19,4 +19,11 @@ public sealed record JobStatusChanged
     public string? ErrorCode { get; init; }
     /// <summary>Optional sanitized summary. Never include raw Terraform output or secrets.</summary>
     public string? ErrorMessage { get; init; }
+
+    /// <summary>Current migration phase of the job.</summary>
+    public MigrationPhase Phase { get; init; } = MigrationPhase.Pending;
+
+    /// <summary>Direct endpoint of the target container once provisioned, before DNS cutover.</summary>
+    public string? TargetEndpoint { get; init; }
 }
+
