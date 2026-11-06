@@ -6,7 +6,6 @@ CloudSwitch has three services. **Doctor** and **Deployer** are responsibilities
 flowchart LR
     Client[Client] -->|REST| API[CloudSwitch.Api]
     API -->|DeploymentRequested| MQ[RabbitMQ]
-    API -.->|Configuration updates: design open| MQ
 
     subgraph Worker[CloudSwitch.Worker]
         Doctor[Doctor: monitors health]
@@ -16,7 +15,6 @@ flowchart LR
     Doctor -->|DeploymentHealthChanged| MQ
     Doctor -->|DeploymentRequested in Automatic mode| MQ
     MQ -->|DeploymentRequested| Deployer
-    MQ -.->|Configuration delivery: design open| Doctor
     Deployer -->|JobStatusChanged| MQ
     MQ -->|Health and job status| Notifications[CloudSwitch.Notifications]
     Notifications -->|SignalR| Client
@@ -58,10 +56,10 @@ Use separate database roles for API and Worker, and one coordinated schema-migra
 
 ## Monitoring configuration
 
-API owns the authoritative settings in PostgreSQL. Event-driven updates are the preferred direction; how Doctor replicas receive them and resume after restart is [open for discussion](discussions/doctor-configuration.md). Per-replica queues and monitoring leases are not requirements.
+API owns the authoritative settings in PostgreSQL. For Sprint 2, direct Doctor reads with configuration revision checks are the proposed minimal approach; this is not yet an approved implementation contract. Event-driven updates, replica delivery and restart behavior are [open for discussion](discussions/doctor-configuration.md). No configuration event/queue or per-replica monitoring lease is part of the agreed baseline.
 
 Doctor checks current policy and active deployment before creating an automatic job. After verified cutover, Deployer records the new active target. Discard observations from an outdated configuration or endpoint.
 
 Run CloudSwitch and its database/broker outside the application's cloud failure domain, not alongside the main application. Recovery must remain possible when that cloud is unavailable.
 
-The diagram describes the agreed design. Contracts and tests exist; the running services and complete migration schema are still pending. See [contracts](contracts.md) and [migration model](domain-model.md).
+The MVP source is **Yandex Cloud Serverless Containers only**, not arbitrary Yandex resources. See [MVP scope and review decisions](mvp-review-decisions.md). The diagram describes the agreed design. Contracts and tests exist; the running services and complete migration schema are still pending. See [contracts](contracts.md) and [migration model](domain-model.md).
