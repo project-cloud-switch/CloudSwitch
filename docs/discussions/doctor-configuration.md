@@ -6,7 +6,7 @@
 
 How should Doctor receive configuration changes and resume monitoring after a restart, without making the first implementation unnecessarily complex?
 
-API owns configuration in PostgreSQL. An API configuration event is the preferred direction. We also want updates to reach every Doctor that needs them.
+API owns configuration in PostgreSQL. **Sprint 2 proposal (not yet approved):** Doctor reads configuration directly from shared PostgreSQL with monotonic configuration revisions. The previous event-driven preference is an alternative, not a decision or required message contract.
 
 ## Configuration contract
 
@@ -18,6 +18,7 @@ The configuration contract can be agreed before committing to a future multi-rep
 
 ## Options to compare
 
+- Start with one Worker replica and direct PostgreSQL reads/revision checks; specify polling/restart/deletion handling. This matches the current API proposal.
 - Start with one Worker replica and event-driven Doctor configuration. Revisit coordination when scaling.
 - Broadcast updates to all Doctor replicas, with a subscription per replica and a database snapshot at startup. Decide separately whether all replicas probe or share responsibility.
 - Use a shared Doctor scheduler that distributes probe work to Worker replicas, instead of maintaining a schedule in each replica.
