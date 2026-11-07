@@ -11,6 +11,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CloudSwitch.Contracts.Tests", "tests\CloudSwitch.Contracts.Tests\CloudSwitch.Contracts.Tests.csproj", "{9BB80A2B-A47D-4345-86E1-10CD43419CAF}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CloudSwitch.Worker", "src\CloudSwitch.Worker\CloudSwitch.Worker.csproj", "{B83664D0-FD97-4BAC-9D2E-DAD755FD198C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CloudSwitch.Worker.Tests", "tests\CloudSwitch.Worker.Tests\CloudSwitch.Worker.Tests.csproj", "{30D98AC3-FC63-4A3B-A5A5-24446FB4F8D3}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -45,6 +49,30 @@ Global
 		{9BB80A2B-A47D-4345-86E1-10CD43419CAF}.Release|x64.Build.0 = Release|Any CPU
 		{9BB80A2B-A47D-4345-86E1-10CD43419CAF}.Release|x86.ActiveCfg = Release|Any CPU
 		{9BB80A2B-A47D-4345-86E1-10CD43419CAF}.Release|x86.Build.0 = Release|Any CPU
+		{B83664D0-FD97-4BAC-9D2E-DAD755FD198C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B83664D0-FD97-4BAC-9D2E-DAD755FD198C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B83664D0-FD97-4BAC-9D2E-DAD755FD198C}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B83664D0-FD97-4BAC-9D2E-DAD755FD198C}.Debug|x64.Build.0 = Debug|Any CPU
+		{B83664D0-FD97-4BAC-9D2E-DAD755FD198C}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B83664D0-FD97-4BAC-9D2E-DAD755FD198C}.Debug|x86.Build.0 = Debug|Any CPU
+		{B83664D0-FD97-4BAC-9D2E-DAD755FD198C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B83664D0-FD97-4BAC-9D2E-DAD755FD198C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B83664D0-FD97-4BAC-9D2E-DAD755FD198C}.Release|x64.ActiveCfg = Release|Any CPU
+		{B83664D0-FD97-4BAC-9D2E-DAD755FD198C}.Release|x64.Build.0 = Release|Any CPU
+		{B83664D0-FD97-4BAC-9D2E-DAD755FD198C}.Release|x86.ActiveCfg = Release|Any CPU
+		{B83664D0-FD97-4BAC-9D2E-DAD755FD198C}.Release|x86.Build.0 = Release|Any CPU
+		{30D98AC3-FC63-4A3B-A5A5-24446FB4F8D3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{30D98AC3-FC63-4A3B-A5A5-24446FB4F8D3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{30D98AC3-FC63-4A3B-A5A5-24446FB4F8D3}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{30D98AC3-FC63-4A3B-A5A5-24446FB4F8D3}.Debug|x64.Build.0 = Debug|Any CPU
+		{30D98AC3-FC63-4A3B-A5A5-24446FB4F8D3}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{30D98AC3-FC63-4A3B-A5A5-24446FB4F8D3}.Debug|x86.Build.0 = Debug|Any CPU
+		{30D98AC3-FC63-4A3B-A5A5-24446FB4F8D3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{30D98AC3-FC63-4A3B-A5A5-24446FB4F8D3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{30D98AC3-FC63-4A3B-A5A5-24446FB4F8D3}.Release|x64.ActiveCfg = Release|Any CPU
+		{30D98AC3-FC63-4A3B-A5A5-24446FB4F8D3}.Release|x64.Build.0 = Release|Any CPU
+		{30D98AC3-FC63-4A3B-A5A5-24446FB4F8D3}.Release|x86.ActiveCfg = Release|Any CPU
+		{30D98AC3-FC63-4A3B-A5A5-24446FB4F8D3}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -52,5 +80,7 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{FE9853CC-CE28-42DD-92A9-50356083BEE1} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{9BB80A2B-A47D-4345-86E1-10CD43419CAF} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{B83664D0-FD97-4BAC-9D2E-DAD755FD198C} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{30D98AC3-FC63-4A3B-A5A5-24446FB4F8D3} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal
