@@ -11,5 +11,11 @@ public interface IMigrationOrchestrator
 {
     Task<MigrationOutcome> ExecuteMigrationAsync(
         DeploymentRequested request,
+        CancellationToken cancellationToken = default) =>
+        ExecuteMigrationAsync(request, 1, cancellationToken);
+
+    Task<MigrationOutcome> ExecuteMigrationAsync(
+        DeploymentRequested request,
+        int attempt,
         CancellationToken cancellationToken = default);
 }

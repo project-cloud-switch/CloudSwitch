@@ -82,6 +82,22 @@ public sealed class JobRecoveryService
                 "Job {JobId} reconciliation: Exists={Exists}, ObservedEndpoint={Endpoint}",
                 lease.JobId, reconcileResult.Exists, reconcileResult.ObservedTargetEndpoint);
 
+            if (!string.IsNullOrEmpty(reconcileResult.ErrorCode))
+            {
+                const string reason = "CONFLICTING_TARGET_STATE";
+                var errMsg = $"Reconciliation detected conflicting target state: {reconcileResult.SanitizedMessage}";
+                await _leaseStore.MarkTerminalAsync(
+                    lease.JobId, lease.Attempt, JobStatus.Failed, reason, errMsg, cancellationToken).ConfigureAwait(false);
+
+                results.Add(new RecoveryExecutionResult
+                {
+                    JobId = lease.JobId,
+                    Recovered = false,
+                    Reason = reason
+                });
+                continue;
+            }
+
             var deploymentRequest = new DeploymentRequested
             {
                 EventId = Guid.NewGuid(),
@@ -94,7 +110,7 @@ public sealed class JobRecoveryService
                 Specification = lease.Specification
             };
 
-            var outcome = await _orchestrator.ExecuteMigrationAsync(deploymentRequest, cancellationToken).ConfigureAwait(false);
+            var outcome = await _orchestrator.ExecuteMigrationAsync(deploymentRequest, lease.Attempt, cancellationToken).ConfigureAwait(false);
 
             if (outcome.IsSuccess)
             {

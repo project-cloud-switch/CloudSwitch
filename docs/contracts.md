@@ -34,17 +34,21 @@ Doctor makes this decision directly; Worker does not consume `DeploymentHealthCh
 
 API stores monitoring settings in shared PostgreSQL and reads health/job progress directly. An event such as `DeploymentMonitoringConfigurationChanged` is proposed for configuration updates, but its schema and replica delivery are [under discussion](discussions/doctor-configuration.md). It is not implemented or part of the agreed queue topology.
 
-Monitoring implementations remain planned in [#14](https://github.com/project-cloud-switch/CloudSwitch/issues/14). **The full migration request and progress schema is also still pending.**
+Monitoring implementations remain planned in [#14](https://github.com/project-cloud-switch/CloudSwitch/issues/14).
 
-## Migration changes — planned in [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2)
+## Migration contracts — agreed and implemented in [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2)
 
-The request must capture:
+The migration request and progress contracts are finalized per [deployment-request discussion](discussions/deployment-request.md) and [job-progress discussion](discussions/job-progress.md):
 
-- Source deployment and target provider/configuration.
-- Pinned image, port/resources, application configuration and secret references.
-- Approved HCL module/revision, target health policy and traffic-cutover configuration.
-
-Keep `DeploymentRequested` as the common request for API and Doctor; extend its snapshot for migration with the service owners. Progress events must include the migration phase, safe target endpoint and failure/cutover outcome. These are requirements, not finalized field names.
+- `DeploymentRequested`: common request published by API and Doctor; carries `Trigger` (`Manual` or `Automatic`), optional `IncidentId` for deduplication, and the immutable `DeploymentSpecification` snapshot.
+- `DeploymentSpecification`:
+  - Pinned container image (with tag or sha256 digest), `ContainerPort`, `ImagePullSecretReference` (Vault reference).
+  - Compute resources: `CpuCores` and `MemoryMb`.
+  - Non-secret `Env` dictionary and `SecretReferences` dictionary (`vault://path#key`). Zero plaintext credentials in broker messages or logs.
+  - Target cloud infrastructure: `TargetConfigurationId` (PostgreSQL reference) and approved `TerraformModule`.
+  - Verification & cutover: `HealthCheck` (`HealthCheckPolicy`), `EntrypointDomain`, and `TrafficRoutingProvider`.
+- `JobStatusChanged`: carries strictly monotonic per-job `Sequence`, `Attempt`, `PreviousStatus`, `Status`, `Phase` (`MigrationPhase`: `Pending`, `Provisioning`, `TargetValidation`, `TrafficCutover`, `EntrypointVerification`, `Completed`), direct `TargetEndpoint`, and sanitized `ErrorCode` / `ErrorMessage`.
+- Out-of-band autonomy: Worker executes provisioning and verification entirely from this snapshot; runtime calls to the failed source cloud are prohibited.
 
 ## Messaging rules
 

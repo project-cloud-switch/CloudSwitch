@@ -71,11 +71,15 @@ public sealed class DeterministicInfrastructureExecutor : IInfrastructureExecuto
             return Task.FromResult(ProvisioningResult.Failure("INVALID_MODULE", msg, TimeSpan.FromMilliseconds(50)));
         }
 
-        // 3. Validate Pinned Image (must not be latest)
+        // 3. Validate Pinned Image (must not be untagged or latest)
         var image = request.Specification.ContainerImage;
-        if (string.IsNullOrWhiteSpace(image) || image.EndsWith(":latest", StringComparison.OrdinalIgnoreCase))
+        var isUnpinned = string.IsNullOrWhiteSpace(image)
+            || (!image.Contains(':') && !image.Contains('@'))
+            || image.EndsWith(":latest", StringComparison.OrdinalIgnoreCase);
+
+        if (isUnpinned)
         {
-            var msg = OutputSanitizer.Sanitize("Container image must be pinned with explicit tag or sha256 digest, 'latest' is prohibited.");
+            var msg = OutputSanitizer.Sanitize("Container image must be pinned with explicit tag or sha256 digest, untagged or ':latest' images are prohibited.");
             return Task.FromResult(ProvisioningResult.Failure("IMAGE_NOT_PINNED", msg, TimeSpan.FromMilliseconds(50)));
         }
 
@@ -88,9 +92,9 @@ public sealed class DeterministicInfrastructureExecutor : IInfrastructureExecuto
             var targetEndpoint = $"http://10.240.0.{ipByte}:{port}";
             var deployedIdentity = $"{request.Provider.ToLowerInvariant()}-vm-{request.DeploymentId.ToString()[..8]}";
 
-            using var sha = SHA256.Create();
             var rawBytes = Encoding.UTF8.GetBytes($"{request.DeploymentId}:{request.Provider}:{request.TerraformModule}:{request.TargetConfigurationId}");
-            var fingerprint = Convert.ToHexString(sha.ComputeHash(rawBytes)).ToLowerInvariant();
+            var hashBytes = SHA256.HashData(rawBytes);
+            var fingerprint = Convert.ToHexString(hashBytes).ToLowerInvariant();
 
             return new DeployedState(targetEndpoint, deployedIdentity, fingerprint, DateTimeOffset.UtcNow);
         });

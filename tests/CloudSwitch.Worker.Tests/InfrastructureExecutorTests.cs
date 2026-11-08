@@ -132,6 +132,19 @@ public class InfrastructureExecutorTests
     }
 
     [Fact]
+    public async Task Rejects_untagged_image()
+    {
+        var request = CreateValidRequest();
+        var spec = request.Specification with { ContainerImage = "docker.io/myorg/demo" };
+        var untaggedRequest = request with { Specification = spec };
+
+        var result = await _executor.ProvisionAsync(untaggedRequest);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("IMAGE_NOT_PINNED", result.ErrorCode);
+    }
+
+    [Fact]
     public async Task Timeout_is_enforced()
     {
         var request = CreateValidRequest() with { Timeout = TimeSpan.Zero };
@@ -151,5 +164,16 @@ public class InfrastructureExecutorTests
         Assert.DoesNotContain("SecretPassword123", sanitized);
         Assert.DoesNotContain("eyJhbGciOiJIUzI1Ni", sanitized);
         Assert.Contains(OutputSanitizer.RedactedMask, sanitized);
+    }
+
+    [Theory]
+    [InlineData("DATABASE_PASSWORD=Secret123!", "DATABASE_PASSWORD=***REDACTED***")]
+    [InlineData("{\"apiKey\": \"sk-ant-12345\"}", "{\"apiKey\": \"***REDACTED***\"}")]
+    [InlineData("Authorization: Bearer my-jwt-token-value", "Authorization: Bearer ***REDACTED***")]
+    [InlineData("access_key: \"AKIAIOSFODNN7EXAMPLE\"", "access_key: \"***REDACTED***\"")]
+    public void Output_sanitizer_redacts_common_secret_formats(string input, string expected)
+    {
+        var result = OutputSanitizer.Sanitize(input);
+        Assert.Equal(expected, result);
     }
 }

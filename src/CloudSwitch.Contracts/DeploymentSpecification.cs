@@ -52,7 +52,7 @@ public sealed record DeploymentSpecification
             && Provider == other.Provider
             && ContainerPort == other.ContainerPort
             && ImagePullSecretReference == other.ImagePullSecretReference
-            && Math.Abs(CpuCores - other.CpuCores) < 0.0001
+            && CpuCores.Equals(other.CpuCores)
             && MemoryMb == other.MemoryMb
             && TargetConfigurationId == other.TargetConfigurationId
             && TerraformModule == other.TerraformModule
@@ -78,23 +78,38 @@ public sealed record DeploymentSpecification
         hash.Add(HealthCheck);
         hash.Add(EntrypointDomain);
         hash.Add(TrafficRoutingProvider);
+        hash.Add(GetDictionaryHashCode(Env));
+        hash.Add(GetDictionaryHashCode(SecretReferences));
         return hash.ToHashCode();
+    }
+
+    private static int GetDictionaryHashCode(IReadOnlyDictionary<string, string>? dict)
+    {
+        if (dict is null || dict.Count == 0) return 0;
+        int hash = dict.Count;
+        foreach (var (k, v) in dict)
+        {
+            hash ^= HashCode.Combine(k.GetHashCode(StringComparison.Ordinal), v.GetHashCode(StringComparison.Ordinal));
+        }
+        return hash;
     }
 
     private static bool DictionariesEqual(
         IReadOnlyDictionary<string, string>? a,
         IReadOnlyDictionary<string, string>? b)
     {
-        if (a is null && b is null) return true;
-        if ((a is null || a.Count == 0) && (b is null || b.Count == 0)) return true;
+        if (ReferenceEquals(a, b)) return true;
+        int aCount = a?.Count ?? 0;
+        int bCount = b?.Count ?? 0;
+        if (aCount == 0 && bCount == 0) return true;
         if (a is null || b is null || a.Count != b.Count) return false;
 
         foreach (var (key, value) in a)
         {
-            if (!b.TryGetValue(key, out var bVal) || bVal != value) return false;
+            if (!b.TryGetValue(key, out var bVal) || !string.Equals(bVal, value, StringComparison.Ordinal))
+                return false;
         }
 
         return true;
     }
 }
-

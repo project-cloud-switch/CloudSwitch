@@ -1,4 +1,5 @@
 using CloudSwitch.Contracts;
+using CloudSwitch.Contracts.Events;
 using CloudSwitch.Worker.Infrastructure;
 using CloudSwitch.Worker.Orchestration;
 using CloudSwitch.Worker.Recovery;
@@ -33,6 +34,7 @@ public class JobRecoveryTests
             Environment = "production",
             Provider = "selectel",
             ContainerPort = 8080,
+            TargetConfigurationId = Guid.NewGuid(),
             TerraformModule = "container-vm-selectel:v1.0.0",
             EntrypointDomain = "demo.example.com",
             HealthCheck = new HealthCheckPolicy
@@ -144,5 +146,46 @@ public class JobRecoveryTests
         Assert.True(singleResult.Recovered);
         Assert.NotNull(singleResult.Outcome);
         Assert.True(singleResult.Outcome.IsSuccess);
+
+        // Check that published events used Attempt = 2
+        var events = harness.Published.Select<JobStatusChanged>().ToList();
+        Assert.All(events, e => Assert.Equal(2, e.Context.Message.Attempt));
+    }
+
+    [Fact]
+    public async Task Conflicting_reconciliation_state_stops_recovery_and_marks_failed()
+    {
+        await using var provider = new ServiceCollection()
+            .AddMassTransitTestHarness()
+            .BuildServiceProvider(true);
+
+        var harness = provider.GetRequiredService<ITestHarness>();
+        await harness.Start();
+
+        var store = new InMemoryJobLeaseStore();
+        // Executor returns conflict on reconciliation:
+        var mockExecutor = new ConflictingInfrastructureExecutor();
+        var healthValidator = new DeterministicHealthValidator();
+        var routingService = new DeterministicTrafficRoutingService();
+        var orchestrator = new MigrationOrchestrator(mockExecutor, healthValidator, routingService, harness.Bus);
+
+        var job = CreateRunningJobLease(expiresAt: DateTimeOffset.UtcNow.AddMinutes(-2));
+        store.RegisterJob(job);
+
+        var recoveryService = new JobRecoveryService(store, mockExecutor, orchestrator, harness.Bus);
+        var recoveryResults = await recoveryService.RecoverStaleJobsAsync("recovery-worker-1", TimeSpan.FromMinutes(5));
+
+        var singleResult = Assert.Single(recoveryResults);
+        Assert.False(singleResult.Recovered);
+        Assert.Equal("CONFLICTING_TARGET_STATE", singleResult.Reason);
+    }
+
+    private sealed class ConflictingInfrastructureExecutor : IInfrastructureExecutor
+    {
+        public Task<ProvisioningResult> ProvisionAsync(ProvisioningRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(ProvisioningResult.Failure("CONFLICT", "Conflict", TimeSpan.Zero));
+
+        public Task<ReconciliationResult> ReconcileAsync(ReconciliationRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(ReconciliationResult.Conflict("CONFLICTING_TARGET_STATE", "Observed conflicting route in DNS"));
     }
 }

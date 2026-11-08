@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using CloudSwitch.Contracts;
 
 namespace CloudSwitch.Worker.Recovery;
@@ -9,12 +8,15 @@ namespace CloudSwitch.Worker.Recovery;
 /// </summary>
 public sealed class InMemoryJobLeaseStore : IJobLeaseStore
 {
-    private readonly ConcurrentDictionary<Guid, JobLease> _leases = new();
+    private readonly Dictionary<Guid, JobLease> _leases = new();
     private readonly object _syncRoot = new();
 
     public void RegisterJob(JobLease lease)
     {
-        _leases[lease.JobId] = lease;
+        lock (_syncRoot)
+        {
+            _leases[lease.JobId] = lease;
+        }
     }
 
     public Task<JobLease?> TryAcquireOrRenewLeaseAsync(

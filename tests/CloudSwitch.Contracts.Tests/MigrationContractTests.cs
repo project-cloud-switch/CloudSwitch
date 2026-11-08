@@ -172,4 +172,60 @@ public class MigrationContractTests
         Assert.Equal("TARGET_HEALTH_CHECK_FAILED", deserialized.ErrorCode);
         Assert.Contains("Cutover prevented", deserialized.ErrorMessage);
     }
+
+    [Fact]
+    public void Deployment_specification_value_equality_and_hash_code_are_consistent()
+    {
+        var targetConfigId = Guid.NewGuid();
+        var spec1 = new DeploymentSpecification
+        {
+            Name = "api",
+            ContainerImage = "registry.example.com/app:v1.0.0",
+            Environment = "staging",
+            Provider = "selectel",
+            ContainerPort = 8080,
+            CpuCores = 1.0,
+            MemoryMb = 1024,
+            TargetConfigurationId = targetConfigId,
+            Env = new Dictionary<string, string>
+            {
+                ["A"] = "1",
+                ["B"] = "2"
+            },
+            SecretReferences = new Dictionary<string, string>
+            {
+                ["SECRET_KEY"] = "vault://secret#key"
+            }
+        };
+
+        // spec2 has reversed key order in Env
+        var spec2 = new DeploymentSpecification
+        {
+            Name = "api",
+            ContainerImage = "registry.example.com/app:v1.0.0",
+            Environment = "staging",
+            Provider = "selectel",
+            ContainerPort = 8080,
+            CpuCores = 1.0,
+            MemoryMb = 1024,
+            TargetConfigurationId = targetConfigId,
+            Env = new Dictionary<string, string>
+            {
+                ["B"] = "2",
+                ["A"] = "1"
+            },
+            SecretReferences = new Dictionary<string, string>
+            {
+                ["SECRET_KEY"] = "vault://secret#key"
+            }
+        };
+
+        Assert.Equal(spec1, spec2);
+        Assert.Equal(spec1.GetHashCode(), spec2.GetHashCode());
+
+        var specWithNullEnv = spec1 with { Env = null };
+        var specWithEmptyEnv = spec1 with { Env = new Dictionary<string, string>() };
+        Assert.Equal(specWithNullEnv, specWithEmptyEnv);
+        Assert.Equal(specWithNullEnv.GetHashCode(), specWithEmptyEnv.GetHashCode());
+    }
 }

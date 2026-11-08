@@ -8,15 +8,13 @@ namespace CloudSwitch.Worker.Infrastructure;
 /// </summary>
 public static partial class OutputSanitizer
 {
-    private static readonly Regex SensitivePatternRegex = new(
-        @"(?i)(password|secret|token|bearer|api[_-]?key|access[_-]?key|credentials?)\s*[:=]\s*[""']?([^""'\s]+)[""']?",
-        RegexOptions.Compiled);
-
-    private static readonly Regex BearerTokenRegex = new(
-        @"(?i)bearer\s+[a-zA-Z0-9\._\-]+",
-        RegexOptions.Compiled);
-
     public const string RedactedMask = "***REDACTED***";
+
+    [GeneratedRegex(@"(?i)([""']?[a-zA-Z0-9_\-]*(?:password|secret|client[_-]?secret|token|bearer|api[_-]?key|access[_-]?key|credentials?)[a-zA-Z0-9_\-]*[""']?)(\s*[:=]\s*[""']?)([^""'\s,;]+)([""']?)")]
+    private static partial Regex SensitivePatternRegex();
+
+    [GeneratedRegex(@"(?i)bearer\s+[a-zA-Z0-9\._\-]+")]
+    private static partial Regex BearerTokenRegex();
 
     public static string Sanitize(string? rawOutput, IEnumerable<string>? explicitSecrets = null, int maxLength = 4000)
     {
@@ -36,14 +34,12 @@ public static partial class OutputSanitizer
             }
         }
 
-        sanitized = SensitivePatternRegex.Replace(sanitized, m =>
-            $"{m.Groups[1].Value}={RedactedMask}");
-
-        sanitized = BearerTokenRegex.Replace(sanitized, $"Bearer {RedactedMask}");
+        sanitized = SensitivePatternRegex().Replace(sanitized, $"$1$2{RedactedMask}$4");
+        sanitized = BearerTokenRegex().Replace(sanitized, $"Bearer {RedactedMask}");
 
         if (sanitized.Length > maxLength)
         {
-            sanitized = sanitized[..maxLength] + "... [TRUNCATED]";
+            sanitized = string.Concat(sanitized.AsSpan(0, maxLength), "... [TRUNCATED]");
         }
 
         return sanitized;

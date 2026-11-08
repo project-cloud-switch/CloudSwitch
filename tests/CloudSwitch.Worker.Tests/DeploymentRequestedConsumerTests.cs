@@ -46,6 +46,7 @@ public class DeploymentRequestedConsumerTests
                 Environment = "production",
                 Provider = "selectel",
                 ContainerPort = 80,
+                TargetConfigurationId = Guid.NewGuid(),
                 TerraformModule = "container-vm-selectel:v1.0.0",
                 EntrypointDomain = "app.example.com",
                 HealthCheck = new HealthCheckPolicy
