@@ -7,4 +7,7 @@ public sealed record DeploymentSpecification
     public required string ContainerImage { get; init; }
     public required string Environment { get; init; }
     public required string Provider { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public MigrationSpecification? Migration { get; init; }
 }

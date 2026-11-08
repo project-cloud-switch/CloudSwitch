@@ -1,6 +1,6 @@
 # Discussion: Shared persistence implementation
 
-**Status: open implementation details; ownership is settled.** Suggested reviewers: Polina, Vlad and Egor. Related task: [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2).
+**Status: initial schema, shared submission rules, outbox and migration ownership implemented.** See [API v1 decisions](../decisions/api-v1.md), `CloudSwitch.Persistence` and `src/CloudSwitch.Persistence/DatabasePermissions.sql`. Suggested reviewers: Polina, Vlad and Egor. Related task: [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2). The original questions follow for review context.
 
 ## Agreed
 

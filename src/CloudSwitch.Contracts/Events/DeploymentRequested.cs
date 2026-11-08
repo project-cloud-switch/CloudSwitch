@@ -11,4 +11,10 @@ public sealed record DeploymentRequested
     public required Guid DeploymentId { get; init; }
     public required Guid UserId { get; init; }
     public required DeploymentSpecification Specification { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public JobTrigger Trigger { get; init; } = JobTrigger.Manual;
+
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? IncidentId { get; init; }
 }

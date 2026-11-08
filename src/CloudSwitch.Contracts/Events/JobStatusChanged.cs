@@ -19,4 +19,7 @@ public sealed record JobStatusChanged
     public string? ErrorCode { get; init; }
     /// <summary>Optional sanitized summary. Never include raw Terraform output or secrets.</summary>
     public string? ErrorMessage { get; init; }
+    public MigrationPhase? Phase { get; init; }
+    public Uri? TargetEndpoint { get; init; }
+    public CutoverOutcome? Cutover { get; init; }
 }

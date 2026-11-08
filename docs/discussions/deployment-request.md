@@ -1,10 +1,10 @@
 # Discussion: DeploymentRequested
 
-**Status: open.** Suggested reviewers: Polina and Vlad. Related task: [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2).
+**Status: API v1 baseline implemented; service integration review remains.** See [selected fields and rules](../decisions/api-v1.md) and [contracts](../contracts.md). Suggested reviewers: Polina and Vlad. Related task: [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2). The original questions follow for review context.
 
-## Current gap
+## Original gap
 
-API and Doctor will publish the same request. Its current specification has only name, image, environment and provider; it cannot describe the agreed migration.
+The original specification contained only name, image, environment and provider. The implemented API baseline now adds the complete immutable migration snapshot while retaining the same message identity.
 
 ## Decide
 

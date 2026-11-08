@@ -1,10 +1,10 @@
 # Discussion: JobStatusChanged
 
-**Status: open.** Suggested reviewers: Vlad and Stepan. Related tasks: [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2), [#9](https://github.com/project-cloud-switch/CloudSwitch/issues/9).
+**Status: phase/endpoint/cutover schema selected; Worker publication remains pending.** See [API v1 decisions](../decisions/api-v1.md) and [contracts](../contracts.md). Suggested reviewers: Vlad and Stepan. Related tasks: [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2), [#9](https://github.com/project-cloud-switch/CloudSwitch/issues/9). The original questions follow for integration review.
 
-## Current gap
+## Original gap
 
-The event carries status, attempts, sequence and safe errors. It lacks migration phase, target endpoint and the outcome of an interrupted cutover.
+The original event carried status, attempts, sequence and safe errors. The API baseline now adds optional phase, target endpoint and cutover outcome fields; Worker still needs to emit them during execution.
 
 ## Decide
 

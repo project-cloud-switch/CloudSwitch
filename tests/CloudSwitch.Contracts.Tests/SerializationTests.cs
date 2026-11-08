@@ -33,6 +33,33 @@ public class SerializationTests
     }
 
     [Fact]
+    public void Complete_migration_snapshot_round_trips_without_losing_reproducible_inputs()
+    {
+        var request = Read<DeploymentRequested>("deployment-requested.v2.json");
+        Assert.Equal(JobTrigger.Automatic, request.Trigger);
+        Assert.NotNull(request.IncidentId);
+        var migration = Assert.IsType<MigrationSpecification>(request.Specification.Migration);
+        Assert.Equal("yandex", migration.Source.Provider);
+        Assert.Equal(2, migration.ConfigurationRevision);
+        Assert.Equal("local-simulation-v1", migration.Target.ModuleRevision);
+        Assert.Equal("secret://demo/api-key", migration.Application.SecretReferences["API_KEY"]);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(Fixture("deployment-requested.v2.json")),
+            JsonSerializer.SerializeToNode(request, JsonOptions)));
+    }
+
+    [Fact]
+    public void Progress_can_report_phase_endpoint_and_uncertain_cutover()
+    {
+        var status = Read<JobStatusChanged>("job-status-changed.v1.json") with
+        {
+            Status = JobStatus.Failed, Phase = MigrationPhase.EntrypointVerification,
+            TargetEndpoint = new Uri("https://target.example.test"), Cutover = CutoverOutcome.Uncertain,
+            ErrorCode = "entrypoint_unverified", ErrorMessage = "Traffic verification did not complete."
+        };
+        Assert.Equal(status, JsonSerializer.Deserialize<JobStatusChanged>(JsonSerializer.Serialize(status, JsonOptions), JsonOptions));
+    }
+
+    [Fact]
     public void Status_event_preserves_ordering_and_optional_failure_details()
     {
         var status = Read<JobStatusChanged>("job-status-changed.v1.json");

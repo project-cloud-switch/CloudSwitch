@@ -1,5 +1,7 @@
 # Contract readiness discussions
 
+The [API v1 implementation decisions](../decisions/api-v1.md) now establish the initial shared schema, complete request snapshot, progress fields and Doctor discovery approach. The notes below preserve the original review questions; remaining work concerns Worker/Notifications implementation and integration review.
+
 Goal: agree on a small contract baseline that API, Worker and Notifications can implement independently. These notes are open questions, not finalized schemas.
 
 Read [architecture](../architecture.md), [current contracts](../contracts.md) and [domain model](../domain-model.md) before the meeting.

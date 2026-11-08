@@ -1,6 +1,8 @@
 # Migration model
 
-Agreed design for [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2). Database entities and migrations are not implemented yet.
+Agreed design for [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2). Shared entities, migrations and durable job creation are implemented in `CloudSwitch.Persistence`; see [API v1 decisions](decisions/api-v1.md). Worker execution remains pending.
+
+Domain models live in `src/CloudSwitch.Persistence/Domain` within the shared project. Entities encapsulate creation, configuration changes, revisions and deletion. Configuration values own immutable copies of their inputs. Required state is initialized through constructors, and optional state is explicitly nullable. MVC controllers use request/response DTOs and call application services, while repositories and EF mappings handle persistence. Integration messages are created through explicit contract mappings.
 
 ## Development scope
 
@@ -22,7 +24,7 @@ Terraform only; OpenTofu, database/volume migration, automatic failback and sour
 
 API reads job/health state directly. Worker initializes runtime state from registration. Doctor uses API-owned settings and the active runtime endpoint; discard observations from outdated settings or endpoints. Notifications owns only delivery/deduplication state. Store secret references, not credentials.
 
-Configuration delivery, restart handling and probe ownership across replicas are [under discussion](discussions/doctor-configuration.md); no extra monitoring-lease table is agreed.
+Initial Doctor discovery reads active PostgreSQL configuration on startup and polls revisions. Event-driven delivery and replica probe ownership remain deferred; no extra monitoring-lease table is required. See [API v1 decisions](decisions/api-v1.md).
 
 ## Failure response
 
