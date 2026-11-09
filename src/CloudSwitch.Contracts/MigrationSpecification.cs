@@ -4,6 +4,7 @@ namespace CloudSwitch.Contracts;
 
 public sealed record ApplicationConfiguration
 {
+    public string? ImagePullSecretReference { get; init; }
     public required string Image { get; init; }
     public required int Port { get; init; }
     public required int CpuMillicores { get; init; }
@@ -20,13 +21,6 @@ public sealed record TrafficConfiguration
     public string? CredentialReference { get; init; }
 }
 
-public sealed record SourceDeploymentSnapshot
-{
-    public required string Provider { get; init; }
-    public required Uri Endpoint { get; init; }
-    public required long RuntimeRevision { get; init; }
-}
-
 public sealed record TargetConfigurationSnapshot
 {
     public required Guid Id { get; init; }
@@ -38,23 +32,6 @@ public sealed record TargetConfigurationSnapshot
     public Dictionary<string, string> Inputs { get; init; } = [];
     public Dictionary<string, string> SecretReferences { get; init; } = [];
 }
-
-/// <summary>Complete immutable migration input; execution must not reread mutable configuration.</summary>
-public sealed record MigrationSpecification
-{
-    public required long ConfigurationRevision { get; init; }
-    public required SourceDeploymentSnapshot Source { get; init; }
-    public required TargetConfigurationSnapshot Target { get; init; }
-    public required ApplicationConfiguration Application { get; init; }
-    public required HealthCheckPolicy TargetHealthCheck { get; init; }
-    public required TrafficConfiguration Traffic { get; init; }
-}
-
-[JsonConverter(typeof(JsonStringEnumConverter<JobTrigger>))]
-public enum JobTrigger { Manual, Automatic }
-
-[JsonConverter(typeof(JsonStringEnumConverter<MigrationPhase>))]
-public enum MigrationPhase { Pending, Provisioning, TargetHealth, TrafficCutover, EntrypointVerification, Completed }
 
 [JsonConverter(typeof(JsonStringEnumConverter<CutoverOutcome>))]
 public enum CutoverOutcome { NotStarted, Applied, Verified, Uncertain }

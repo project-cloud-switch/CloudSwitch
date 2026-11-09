@@ -131,15 +131,24 @@ public sealed class DomainModelTests
 
     [Theory]
     [InlineData("deployment-requested.v1.json")]
-    [InlineData("deployment-requested.v2.json")]
-    public void Existing_snapshots_round_trip_through_domain_and_contract_mapping(string fixture)
+    [InlineData("deployment-requested.v2-legacy.json")]
+    public void Existing_persisted_snapshots_map_to_the_agreed_contract(string fixture)
     {
         var json = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", fixture));
         var options = CloudSwitchDbContext.JsonOptions;
         var domain = JsonSerializer.Deserialize<Domain.JobRequestSnapshot>(json, options)!;
         var original = JsonSerializer.Deserialize<CloudSwitch.Contracts.Events.DeploymentRequested>(json, options)!;
-        Assert.True(JsonNode.DeepEquals(JsonSerializer.SerializeToNode(original, options),
-            JsonSerializer.SerializeToNode(domain.ToContract(), options)));
+        var mapped = domain.ToContract();
+        Assert.Equal(original.JobId, mapped.JobId);
+        Assert.Equal(original.Specification.ContainerImage, mapped.Specification.ContainerImage);
+        Assert.Equal(original.Trigger, mapped.Trigger);
+        if (domain.Specification.Migration is { } migration)
+        {
+            Assert.Equal(migration.Target.Id, mapped.Specification.TargetConfigurationId);
+            Assert.Equal(migration.Application.Port, mapped.Specification.ContainerPort);
+            Assert.Equal(migration.Application.CpuMillicores / 1000d, mapped.Specification.CpuCores);
+            Assert.Equal(migration.Traffic.RecordName, mapped.Specification.EntrypointDomain);
+        }
     }
 
     [Fact]
@@ -160,7 +169,7 @@ public sealed class DomainModelTests
     [InlineData("application")]
     public void Required_snapshot_fields_reject_null_and_missing_values(string field)
     {
-        var json = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "deployment-requested.v2.json"));
+        var json = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "deployment-requested.v2-legacy.json"));
         var root = Assert.IsType<JsonObject>(JsonNode.Parse(json));
         var specification = Assert.IsType<JsonObject>(root["specification"]);
         var migration = Assert.IsType<JsonObject>(specification["migration"]);

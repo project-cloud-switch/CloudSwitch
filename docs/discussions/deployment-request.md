@@ -1,22 +1,27 @@
 # Discussion: DeploymentRequested
 
-**Status: API v1 baseline implemented; service integration review remains.** See [selected fields and rules](../decisions/api-v1.md) and [contracts](../contracts.md). Suggested reviewers: Polina and Vlad. Related task: [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2). The original questions follow for review context.
+**Status: agreed.** Reviewers: Polina and Vlad. Related task: [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2).
 
-## Original gap
+## Current gap
 
-The original specification contained only name, image, environment and provider. The implemented API baseline now adds the complete immutable migration snapshot while retaining the same message identity.
+API and Doctor publish the same request. The previous specification had only name, image, environment and provider; it could not describe the agreed migration or run autonomous recovery without accessing the failed source.
 
-## Decide
+## Agreed decisions
 
-- Which source deployment and target configuration references are required?
-- What must be captured in the immutable snapshot: image digest, port/resources, application settings, secret references, approved Terraform module/revision, target health policy and traffic configuration?
-- How do we distinguish a user request from automatic recovery, and link an automatic job to its incident?
-- Which values must be embedded versus resolved from stored configuration? Referenced values must remain reproducible after configuration edits.
+1. **Trigger and incident tracking:**
+   - Added `DeploymentTrigger` (`Manual`, `Automatic`) to `DeploymentRequested`.
+   - Added `IncidentId` (`Guid?`) for automatic recovery to enable database-level and execution deduplication per `(DeploymentId, IncidentId)`.
 
-## Keep fixed
+2. **Immutable snapshot content (`DeploymentSpecification`):**
+   - **Container & Registry:** `ContainerPort` (default 80), `ImagePullSecretReference` (link to registry token in Vault), pinned image with digest/tag.
+   - **Resources:** `CpuCores` (default 1.0) and `MemoryMb` (default 512).
+   - **Configuration & Secrets:** Non-secret `Env` dictionary, and `SecretReferences` dictionary containing Vault references (`vault://path#key`). Raw secrets are **never** embedded in broker messages or committed logs.
+   - **Infrastructure & Execution:** `TargetConfigurationId` (PostgreSQL profile reference) and approved `TerraformModule` name and version/revision.
+   - **Verification & Cutover:** `HealthCheck` (`HealthCheckPolicy`) for pre-cutover validation, `EntrypointDomain` for traffic switching, and `TrafficRoutingProvider`.
 
-API and Doctor save the job before publishing through an outbox. Source access is not required during migration. No credentials, arbitrary HCL or shell commands belong in the request.
+3. **Autonomy guarantee:**
+   - The worker executes provisioning and validation completely out-of-band using this snapshot. No runtime calls to the failed source cloud are permitted.
 
-## Meeting output
+4. **Implementation status:**
+   - C# contracts in `CloudSwitch.Contracts` and unit tests in `CloudSwitch.Contracts.Tests` have been implemented and verified.
 
-An agreed field/type/requiredness list and sample payloads for manual and automatic migration, plus responsibility for updating the C# contract.

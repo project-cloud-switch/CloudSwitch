@@ -1,6 +1,6 @@
 # Working API
 
-The API supports Keycloak authentication, owned deployment/target configuration, recovery policies, health reads and durable migration job submission. The [API v1 decisions](decisions/api-v1.md) define the shared schema and message baseline. Worker and Notifications remain separate implementations.
+The API supports Keycloak authentication, owned deployment/target configuration, recovery policies, health reads and durable migration job submission. The [agreed request](discussions/deployment-request.md) and [progress](discussions/job-progress.md) discussions define the messages, and [API v1 decisions](decisions/api-v1.md) describe the shared schema. Worker and Notifications remain separate implementations.
 
 ## Start locally
 
@@ -91,7 +91,7 @@ POST `/api/v1/deployments`:
       "cpuMillicores": 500,
       "memoryMegabytes": 256,
       "settings": {"LOG_LEVEL": "info"},
-      "secretReferences": {"API_KEY": "secret://demo/api-key"}
+      "secretReferences": {"API_KEY": "vault://demo#api-key"}
     },
     "healthCheck": {
       "path": "/health",
@@ -105,7 +105,7 @@ POST `/api/v1/deployments`:
 }
 ```
 
-Replace the fixture digest with a real image digest before cloud execution. Monitoring defaults to enabled; recovery defaults to NotifyOnly. HTTP(S) source endpoints cannot contain credentials, queries or fragments and must match `Endpoints:AllowedHosts`. Local examples allow `localhost`, `127.0.0.1` and `app.example.test`. Doctor/Deployer must validate resolved destinations and redirects at execution time.
+Images accept an explicit tag or a complete SHA-256 digest. Replace the fixture digest with a real image reference before cloud execution. Optional `application.imagePullSecretReference` carries a Vault registry credential reference. Monitoring defaults to enabled; recovery defaults to NotifyOnly. HTTP(S) source endpoints cannot contain credentials, queries or fragments and must match `Endpoints:AllowedHosts`. Local examples allow `localhost`, `127.0.0.1` and `app.example.test`. Doctor/Deployer must validate resolved destinations and redirects at execution time.
 
 Health paths are local application paths; interval is 1–3600 seconds, timeout 1–60 seconds (no greater than interval), and thresholds 1–100. CPU is 100–64000 millicores; memory is 64–262144 MB. Traffic drivers are `simulation` and `cloudflare-dns`; the latter requires a zone reference and secret credential reference. These describe future execution, not API-side infrastructure changes.
 
@@ -116,11 +116,11 @@ POST `/api/v1/deployments/{id}/targets`:
   "provider": "local",
   "moduleId": "local-stateless-v1",
   "inputs": {"region": "local"},
-  "secretReferences": {"cloud": "secret://demo/cloud"}
+  "secretReferences": {"cloud": "vault://demo#cloud"}
 }
 ```
 
-The API resolves module source/revision from the operator's `Terraform:Modules` allowlist. Callers cannot provide arbitrary HCL/module sources or undeclared inputs. Production must approve real modules with immutable revisions; the local entry reserves a simulation module identity for Worker development. Credentials belong in a secret store, referenced as `secret://...`, never in settings or module inputs. Execution resolves references.
+The API resolves module source/revision from the operator's `Terraform:Modules` allowlist. Callers cannot provide arbitrary HCL/module sources or undeclared inputs. Production must approve real modules with immutable revisions; the local entry reserves a simulation module identity for Worker development. Credentials belong in a secret store, referenced as `vault://path#key`, never in settings or module inputs. Execution resolves references.
 
 PUT the deployment with its ETag and set `definition.recovery` to `{"mode":"Automatic","targetConfigurationId":"<target UUID>"}` when wanted. The target must belong to this deployment and remain approved. Submit manually with `{"targetConfigurationId":"<target UUID>"}` and an `Idempotency-Key`.
 
@@ -159,4 +159,8 @@ Default JWT/host/contract tests need no external services. PostgreSQL tests are 
 CLOUDSWITCH_TEST_POSTGRES='Host=localhost;Port=55432;Database=cloudswitch;Username=cloudswitch;Password=cloudswitch-dev' dotnet test CloudSwitch.sln
 ```
 
-The API does not execute Terraform or simulate successful migration. Worker must initialize runtime, monitor health, claim/fence jobs, provision the target, verify health, switch traffic and verify the entrypoint. It owns execution updates and outgoing status events. Until then, jobs remain Pending, event lists are empty, and unobserved health is Unknown. Notifications/SignalR remain separate. Initial Doctor configuration discovery reads PostgreSQL at startup and polls revisions; event distribution and replica coordination are deferred.
+Worker now consumes the agreed request queue using RabbitMQ, claims and renews PostgreSQL leases, persists phase/sequence/checkpoints, and commits status history and outgoing events through the MassTransit EF bus outbox. It activates the target runtime only after verified completion. Expired owners cannot write progress. Interrupted cutovers fail with an uncertain outcome for manual reconciliation.
+
+Run `dotnet run --project src/CloudSwitch.Worker` for explicit Development simulation against an isolated local database. Simulation accepts the approved `local-stateless-v1:local-simulation-v1` target. Provisioning, target health and traffic verification use deterministic adapters. Real Terraform, Vault resolution, HTTP/DNS adapters, Doctor monitoring and Notifications remain pending. Unobserved health stays Unknown.
+
+PostgreSQL tests also cover Worker fencing, restart sequence continuity, progress/outbox rollback, and API progress reads. Set `CLOUDSWITCH_TEST_RABBITMQ` to `amqp://cloudswitch:cloudswitch-dev@localhost:5672` alongside the PostgreSQL connection to run the broker integration test. It creates and removes a random virtual host. The management API defaults to `http://localhost:15672`, overridable through `CLOUDSWITCH_TEST_RABBITMQ_MANAGEMENT`. The broker test starts the Worker before publishing and waits for verified job completion through the API.

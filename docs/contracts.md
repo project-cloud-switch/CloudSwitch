@@ -2,7 +2,7 @@
 
 `CloudSwitch.Contracts` holds shared message definitions. Service logic and persistence stay in API, Worker and Notifications.
 
-The [API v1 decisions](decisions/api-v1.md) establish the implemented schema and durable submission baseline. The [discussion notes](discussions/README.md) retain the original questions and service-integration follow-ups.
+Remaining decisions and the meeting agenda are in [contract readiness discussions](discussions/README.md).
 
 ## Implemented contracts
 
@@ -14,7 +14,7 @@ The [API v1 decisions](decisions/api-v1.md) establish the implemented schema and
 
 Doctor and Deployer run inside Worker. See the [architecture diagram](architecture.md).
 
-Job events carry `EventId`, `CorrelationId`, `OccurredAt`, `JobId`, `DeploymentId` and `UserId`. `DeploymentSpecification` retains `Name`, `ContainerImage`, `Environment` and target `Provider`, and adds a complete `Migration` snapshot. `DeploymentRequested` adds `Trigger` (Manual by default) and optional `IncidentId`. Statuses remain `Pending`, `Running`, `Succeeded` and `Failed`, serialized as strings.
+Job events carry `EventId`, `CorrelationId`, `OccurredAt`, `JobId`, `DeploymentId` and `UserId`. The submission snapshot includes the agreed migration fields described below. Statuses are `Pending`, `Running`, `Succeeded` and `Failed`, serialized as strings.
 
 ## Health monitoring and recovery
 
@@ -32,24 +32,23 @@ Doctor publishes `DeploymentHealthChanged` on persisted transitions between `Unk
 
 Doctor makes this decision directly; Worker does not consume `DeploymentHealthChanged` to create another request. API and Doctor share the same durable job/request rules.
 
-API stores monitoring settings in shared PostgreSQL and reads health/job progress directly. Initial Doctor configuration discovery reads active rows on startup and polls revisions. `DeploymentMonitoringConfigurationChanged` and replica distribution are deferred; no configuration event is part of the current queue topology.
+API stores monitoring settings in shared PostgreSQL and reads health/job progress directly. An event such as `DeploymentMonitoringConfigurationChanged` is proposed for configuration updates, but its schema and replica delivery are [under discussion](discussions/doctor-configuration.md). It is not implemented or part of the agreed queue topology.
 
-Monitoring execution remains planned in [#14](https://github.com/project-cloud-switch/CloudSwitch/issues/14). Shared job creation already enforces current health, policy, incident and revision checks for automatic submissions.
+Monitoring implementations remain planned in [#14](https://github.com/project-cloud-switch/CloudSwitch/issues/14).
 
-## Migration snapshot — implemented API baseline
+## Migration contracts — agreed and implemented in [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2)
 
-`DeploymentSpecification.Migration` captures:
+The migration request and progress contracts are finalized per [deployment-request discussion](discussions/deployment-request.md) and [job-progress discussion](discussions/job-progress.md):
 
-- `ConfigurationRevision` and `Source`: active provider, endpoint and runtime revision (zero means the registered source before Worker initialization).
-- `Target`: target ID/revision, provider, approved module ID/source/revision, allowed inputs and secret references.
-- `Application`: digest-pinned image, port, CPU millicores, memory megabytes, nonsecret settings and secret references.
-- `TargetHealthCheck` and `Traffic`: health policy and traffic driver/record/zone/credential reference.
-
-API and Doctor use `JobSubmissionService` from `CloudSwitch.Persistence` to save this snapshot and its outgoing request atomically. The manual/automatic trigger is explicit; automatic requests require an incident ID. Repeated manual keys or automatic incidents return the original job rather than rebuilding its snapshot from mutable configuration.
-
-`JobStatusChanged` adds optional `Phase`, `TargetEndpoint` and `Cutover`. Phases are Pending, Provisioning, TargetHealth, TrafficCutover, EntrypointVerification and Completed. Cutover outcomes are NotStarted, Applied, Verified and Uncertain. Worker must sequence phase/status events, sanitize failures and endpoints, and emit Succeeded only after target health and entrypoint verification; execution remains pending.
-
-These fields are additive: existing message URNs and v1 fixtures remain valid, and Manual is the default trigger. New migration execution requires a non-null complete snapshot; a legacy request must not be treated as sufficient migration input. The v2 fixture demonstrates automatic submission with immutable inputs.
+- `DeploymentRequested`: common request published by API and Doctor; carries `Trigger` (`Manual` or `Automatic`), optional `IncidentId` for deduplication, and the immutable `DeploymentSpecification` snapshot.
+- `DeploymentSpecification`:
+  - Pinned container image (with tag or sha256 digest), `ContainerPort`, `ImagePullSecretReference` (Vault reference).
+  - Compute resources: `CpuCores` and `MemoryMb`.
+  - Non-secret `Env` dictionary and `SecretReferences` dictionary (`vault://path#key`). Zero plaintext credentials in broker messages or logs.
+  - Target cloud infrastructure: `TargetConfigurationId` (PostgreSQL reference) and approved `TerraformModule`.
+  - Verification & cutover: `HealthCheck` (`HealthCheckPolicy`), `EntrypointDomain`, and `TrafficRoutingProvider`.
+- `JobStatusChanged`: carries strictly monotonic per-job `Sequence`, `Attempt`, `PreviousStatus`, `Status`, `Phase` (`MigrationPhase`: `Pending`, `Provisioning`, `TargetValidation`, `TrafficCutover`, `EntrypointVerification`, `Completed`), direct `TargetEndpoint`, and sanitized `ErrorCode` / `ErrorMessage`.
+- Out-of-band autonomy: Worker executes provisioning and verification entirely from this snapshot; runtime calls to the failed source cloud are prohibited.
 
 ## Messaging rules
 
@@ -67,4 +66,4 @@ Credentials are referenced, never embedded. Services validate inputs and ownersh
 
 Deployer replicas share the request queue. Notifications has separate health/status queues; it does not compete with Deployer for requests. Create bindings before publishing; configure bounded retries and error queues in each service.
 
-Tests verify v1/v2 JSON compatibility, message identities, delivery and correlation with MassTransit 8.5.8. PostgreSQL tests verify durable submission/outbox constraints. Local Compose provisions the durable topology. Worker execution and production service integration remain pending.
+Tests verify JSON compatibility, message identities, delivery and correlation using MassTransit 8.5.8. Optional isolated PostgreSQL/RabbitMQ tests cover API outbox delivery to Worker, persisted progress, transactional rollback and lease fencing. Local execution uses deterministic simulation adapters. Cloud provisioning and real probe/DNS adapters remain pending.

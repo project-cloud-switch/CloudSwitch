@@ -1,6 +1,6 @@
 # Migration model
 
-Agreed design for [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2). Shared entities, migrations and durable job creation are implemented in `CloudSwitch.Persistence`; see [API v1 decisions](decisions/api-v1.md). Worker execution remains pending.
+Agreed design for [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2). Shared entities, migrations and durable job creation are implemented in `CloudSwitch.Persistence`; see [API v1 decisions](decisions/api-v1.md). Worker execution uses persistent leases/progress and transactional outbox messaging with explicit local simulation adapters. Real cloud execution and Doctor monitoring remain pending.
 
 Domain models live in `src/CloudSwitch.Persistence/Domain` within the shared project. Entities encapsulate creation, configuration changes, revisions and deletion. Configuration values own immutable copies of their inputs. Required state is initialized through constructors, and optional state is explicitly nullable. MVC controllers use request/response DTOs and call application services, while repositories and EF mappings handle persistence. Integration messages are created through explicit contract mappings.
 

@@ -16,6 +16,9 @@ public sealed class DatabaseFactAttribute : FactAttribute
     }
 }
 
+[CollectionDefinition("PostgreSQL")]
+public sealed class DatabaseCollection : ICollectionFixture<DatabaseFixture>;
+
 public sealed class DatabaseFixture : IAsyncLifetime
 {
     private readonly string? admin = Environment.GetEnvironmentVariable("CLOUDSWITCH_TEST_POSTGRES");

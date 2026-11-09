@@ -6,6 +6,7 @@ namespace CloudSwitch.Persistence.Domain;
 public sealed record ApplicationConfiguration
 {
     public string Image { get; }
+    public string? ImagePullSecretReference { get; }
     public int Port { get; }
     public int CpuMillicores { get; }
     public int MemoryMegabytes { get; }
@@ -13,12 +14,16 @@ public sealed record ApplicationConfiguration
     public IReadOnlyDictionary<string, string> SecretReferences { get; }
 
     public ApplicationConfiguration(string image, int port, int cpuMillicores, int memoryMegabytes,
-        IReadOnlyDictionary<string, string>? settings = null, IReadOnlyDictionary<string, string>? secretReferences = null)
+        IReadOnlyDictionary<string, string>? settings = null, IReadOnlyDictionary<string, string>? secretReferences = null,
+        string? imagePullSecretReference = null)
     {
-        DomainGuard.Require(ConfigurationRules.PinnedImage(image), "Pin the application image to a SHA-256 digest.");
+        DomainGuard.Require(ConfigurationRules.PinnedImage(image), "Pin the application image to an explicit tag or a SHA-256 digest.");
         DomainGuard.Require(port is >= 1 and <= 65535, "Application port must be between 1 and 65535.");
         DomainGuard.Require(cpuMillicores is >= 100 and <= 64000, "CPU must be between 100 and 64000 millicores.");
         DomainGuard.Require(memoryMegabytes is >= 64 and <= 262144, "Memory must be between 64 and 262144 MB.");
+        DomainGuard.Require(imagePullSecretReference is null || ConfigurationRules.SecretReference(imagePullSecretReference),
+            "The registry credential must be a Vault reference.");
+        ImagePullSecretReference = imagePullSecretReference;
         Image = image;
         Port = port;
         CpuMillicores = cpuMillicores;
@@ -91,7 +96,7 @@ public sealed record TrafficConfiguration
 
 internal static partial class ConfigurationRules
 {
-    public static bool PinnedImage(string? value) => ImagePattern().IsMatch(value ?? "");
+    public static bool PinnedImage(string? value) => !string.IsNullOrWhiteSpace(value) && ImagePattern().IsMatch(value) && !value.EndsWith(":latest", StringComparison.OrdinalIgnoreCase);
     public static bool SecretReference(string? value) => SecretPattern().IsMatch(value ?? "");
 
     public static IReadOnlyDictionary<string, string> Values(IReadOnlyDictionary<string, string>? values, int maximumLength)
@@ -105,14 +110,14 @@ internal static partial class ConfigurationRules
     public static IReadOnlyDictionary<string, string> Secrets(IReadOnlyDictionary<string, string>? values)
     {
         var references = Values(values, 512);
-        DomainGuard.Require(references.Values.All(SecretReference), "Credentials must use secret:// references.");
+        DomainGuard.Require(references.Values.All(SecretReference), "Credentials must use Vault references.");
         return references;
     }
 
     [GeneratedRegex(@"\A[a-zA-Z_][a-zA-Z0-9_.-]{0,63}\z")]
     private static partial Regex IdentifierPattern();
-    [GeneratedRegex(@"\A[a-zA-Z0-9][a-zA-Z0-9._:/-]*@sha256:[a-fA-F0-9]{64}\z")]
+    [GeneratedRegex(@"\A[a-zA-Z0-9][a-zA-Z0-9._:/-]*(?:@sha256:[a-fA-F0-9]{64}|:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})\z")]
     private static partial Regex ImagePattern();
-    [GeneratedRegex(@"\Asecret://[a-zA-Z0-9][a-zA-Z0-9_./-]{0,500}\z")]
+    [GeneratedRegex(@"\A(?:vault://[a-zA-Z0-9][a-zA-Z0-9_./-]{0,450}#[a-zA-Z0-9_.-]{1,64}|secret://[a-zA-Z0-9][a-zA-Z0-9_./-]{0,500})\z")]
     private static partial Regex SecretPattern();
 }

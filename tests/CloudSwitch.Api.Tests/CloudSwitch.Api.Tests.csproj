@@ -16,6 +16,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <ProjectReference Include="../../src/CloudSwitch.Api/CloudSwitch.Api.csproj" />
+    <ProjectReference Include="../../src/CloudSwitch.Worker/CloudSwitch.Worker.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="../../src/CloudSwitch.Persistence/DatabasePermissions.sql" Link="permissions.sql" CopyToOutputDirectory="PreserveNewest" />

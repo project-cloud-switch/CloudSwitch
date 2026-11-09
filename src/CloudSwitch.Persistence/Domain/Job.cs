@@ -25,6 +25,8 @@ public sealed record JobProgress(Guid EventId, Guid CorrelationId, DateTimeOffse
     string? ErrorCode = null, string? ErrorMessage = null, MigrationPhase? Phase = null,
     Uri? TargetEndpoint = null, CutoverOutcome? Cutover = null);
 
+public sealed record JobExecutionCheckpoint(string? StateFingerprint = null);
+
 public sealed class Job
 {
     public Guid Id { get; private set; }
@@ -42,7 +44,7 @@ public sealed class Job
     public string? LeaseOwner { get; private set; }
     public DateTimeOffset? LeaseExpiresAt { get; private set; }
     public long FencingToken { get; private set; }
-    public string Checkpoints { get; private set; } = "{}";
+    public JobExecutionCheckpoint Checkpoints { get; private set; } = new();
     public Uri? TargetEndpoint { get; private set; }
     public CutoverOutcome Cutover { get; private set; }
     public string? ErrorCode { get; private set; }
@@ -52,6 +54,61 @@ public sealed class Job
 
     private Job(JobRequestSnapshot request)
         => Request = request ?? throw new ArgumentNullException(nameof(request));
+
+    public bool CanAcquireLease(DateTimeOffset now)
+        => Status is JobStatus.Pending or JobStatus.Running && (LeaseExpiresAt is null || LeaseExpiresAt <= now);
+
+    public bool OwnsLease(string owner, long fencingToken, DateTimeOffset now)
+        => Status is JobStatus.Pending or JobStatus.Running && LeaseOwner == owner && FencingToken == fencingToken && LeaseExpiresAt > now;
+
+    public void AcquireLease(string owner, TimeSpan duration, DateTimeOffset now)
+    {
+        DomainGuard.Require(CanAcquireLease(now), "The job is already leased or terminal.");
+        var nextOwner = DomainGuard.Text(owner, nameof(LeaseOwner), 256);
+        DomainGuard.Require(duration > TimeSpan.Zero, "Lease duration must be positive.");
+        var nextAttempt = checked(Attempt + 1);
+        var nextFence = checked(FencingToken + 1);
+        var expiresAt = now.Add(duration);
+        LeaseOwner = nextOwner;
+        Attempt = nextAttempt;
+        FencingToken = nextFence;
+        LeaseExpiresAt = expiresAt;
+        UpdatedAt = now;
+    }
+
+    public void RenewLease(TimeSpan duration, DateTimeOffset now)
+    {
+        DomainGuard.Require(Status is JobStatus.Pending or JobStatus.Running && LeaseExpiresAt > now && duration > TimeSpan.Zero,
+            "Only an active lease can be renewed.");
+        LeaseExpiresAt = now.Add(duration);
+        UpdatedAt = now;
+    }
+
+    public JobProgress RecordProgress(JobStatus status, MigrationPhase phase, CutoverOutcome cutover,
+        Uri? endpoint, string? errorCode, string? errorMessage, DateTimeOffset now, JobStatus? previousStatus = null, string? stateFingerprint = null)
+    {
+        DomainGuard.Require(Status is JobStatus.Pending or JobStatus.Running && Enum.IsDefined(phase) && Enum.IsDefined(cutover)
+            && status is JobStatus.Running or JobStatus.Succeeded or JobStatus.Failed, "Job progress is invalid.");
+        DomainGuard.Require(status != JobStatus.Succeeded || phase == MigrationPhase.Completed
+            && cutover == CutoverOutcome.Verified && endpoint is not null, "Success requires verified traffic and a target endpoint.");
+        var previous = previousStatus ?? Status;
+        Sequence = checked(Sequence + 1);
+        Checkpoints = new JobExecutionCheckpoint(stateFingerprint);
+        Status = status;
+        Phase = phase;
+        Cutover = cutover;
+        TargetEndpoint = endpoint;
+        ErrorCode = errorCode;
+        ErrorMessage = errorMessage;
+        UpdatedAt = now;
+        if (status is JobStatus.Succeeded or JobStatus.Failed)
+        {
+            LeaseOwner = null;
+            LeaseExpiresAt = null;
+        }
+        return new JobProgress(Guid.NewGuid(), Request.CorrelationId, now, Id, DeploymentId, UserId,
+            previous, status, Attempt, Sequence, errorCode, errorMessage, phase, TargetEndpoint, cutover);
+    }
 
     public static Job Create(Guid deploymentId, Guid userId, DeploymentSpecification specification, JobTrigger trigger,
         string? idempotencyKey, Guid? incidentId, Guid correlationId, DateTimeOffset now)

@@ -64,4 +64,4 @@ Doctor checks current policy and active deployment before creating an automatic 
 
 Run CloudSwitch and its database/broker outside the application's cloud failure domain, not alongside the main application. Recovery must remain possible when that cloud is unavailable.
 
-The [working API](api.md), shared schema/migrations, contracts and tests exist. Worker execution and Notifications remain pending. See [contracts](contracts.md) and [migration model](domain-model.md).
+The [working API](api.md), shared schema/migrations, contracts and tests exist. Worker execution has PostgreSQL/RabbitMQ integration and explicit local simulation adapters. Real cloud adapters, Doctor monitoring and Notifications remain pending. See [contracts](contracts.md) and [migration model](domain-model.md).

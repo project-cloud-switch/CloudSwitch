@@ -17,7 +17,8 @@ using Domain = CloudSwitch.Persistence.Domain;
 
 namespace CloudSwitch.Api.Tests;
 
-public sealed class PersistenceTests(DatabaseFixture fixture) : IClassFixture<DatabaseFixture>
+[Collection("PostgreSQL")]
+public sealed class PersistenceTests(DatabaseFixture fixture)
 {
     private HttpClient Client(string subject = "owner")
     {
@@ -26,7 +27,7 @@ public sealed class PersistenceTests(DatabaseFixture fixture) : IClassFixture<Da
         return client;
     }
 
-    private static DeploymentRequest Definition() => new()
+    internal static DeploymentRequest Definition() => new()
     {
         Name = "demo",
         Definition = new DeploymentDefinitionDto
@@ -35,21 +36,21 @@ public sealed class PersistenceTests(DatabaseFixture fixture) : IClassFixture<Da
             Application = new ApplicationConfiguration
             {
                 Image = "nginx@sha256:" + new string('a', 64), Port = 80, CpuMillicores = 500, MemoryMegabytes = 256,
-                SecretReferences = new() { ["API_KEY"] = "secret://demo/api-key" }
+                SecretReferences = new() { ["API_KEY"] = "vault://demo#api-key" }
             },
             HealthCheck = new HealthCheckPolicy { Path = "/health", IntervalSeconds = 10, TimeoutSeconds = 3, FailureThreshold = 3, RecoveryThreshold = 2 },
             Traffic = new TrafficConfiguration { Driver = "simulation", RecordName = "app.example.test" }
         }
     };
 
-    private static async Task<DeploymentResponse> CreateDeploymentAsync(HttpClient client)
+    internal static async Task<DeploymentResponse> CreateDeploymentAsync(HttpClient client)
     {
         using var response = await client.PostAsJsonAsync("/api/v1/deployments", Definition());
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<DeploymentResponse>())!;
     }
 
-    private static async Task<TargetResponse> CreateTargetAsync(HttpClient client, Guid deploymentId)
+    internal static async Task<TargetResponse> CreateTargetAsync(HttpClient client, Guid deploymentId)
     {
         using var response = await client.PostAsJsonAsync($"/api/v1/deployments/{deploymentId}/targets",
             new TargetRequest { Provider = "local", ModuleId = "local-stateless-v1", Inputs = new() { ["region"] = "test" } });
@@ -57,12 +58,35 @@ public sealed class PersistenceTests(DatabaseFixture fixture) : IClassFixture<Da
         return (await response.Content.ReadFromJsonAsync<TargetResponse>())!;
     }
 
-    private static Task<HttpResponseMessage> SubmitAsync(HttpClient client, Guid deploymentId, Guid targetId, string key)
+    internal static Task<HttpResponseMessage> SubmitAsync(HttpClient client, Guid deploymentId, Guid targetId, string key)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/deployments/{deploymentId}/jobs")
         { Content = JsonContent.Create(new JobRequest(targetId)) };
         request.Headers.Add("Idempotency-Key", key);
         return client.SendAsync(request);
+    }
+
+    [DatabaseFact]
+    public async Task Tagged_image_and_registry_vault_reference_reach_the_agreed_snapshot()
+    {
+        using var client = Client();
+        var input = Definition();
+        input = input with { Definition = input.Definition with { Application = input.Definition.Application with
+        {
+            Image = "registry.example.test/demo:1.2.3", ImagePullSecretReference = "vault://registry#token"
+        } } };
+        using var created = await client.PostAsJsonAsync("/api/v1/deployments", input);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var deployment = (await created.Content.ReadFromJsonAsync<DeploymentResponse>())!;
+        var target = await CreateTargetAsync(client, deployment.Id);
+        using var submitted = await SubmitAsync(client, deployment.Id, target.Id, "tag-and-registry");
+        Assert.Equal(HttpStatusCode.Accepted, submitted.StatusCode);
+        var job = (await submitted.Content.ReadFromJsonAsync<JobResponse>())!;
+        Assert.Equal("registry.example.test/demo:1.2.3", job.Specification.ContainerImage);
+        Assert.Equal("vault://registry#token", job.Specification.ImagePullSecretReference);
+        Assert.Equal(0.5, job.Specification.CpuCores);
+        Assert.Equal("vault://demo#api-key", job.Specification.SecretReferences!["API_KEY"]);
+        Assert.Equal("app.example.test", job.Specification.EntrypointDomain);
     }
 
     [DatabaseFact]
@@ -197,8 +221,8 @@ public sealed class PersistenceTests(DatabaseFixture fixture) : IClassFixture<Da
         var outbox = await db.Set<OutboxMessage>().SingleAsync(x => x.MessageId == persisted.Request.EventId);
         Assert.Equal(job.CorrelationId, outbox.CorrelationId);
         Assert.Contains(job.Id.ToString(), outbox.Body);
-        Assert.Equal(1, job.Specification.Migration!.ConfigurationRevision);
-        Assert.Equal(target.Configuration.ModuleRevision, job.Specification.Migration.Target.ModuleRevision);
+        Assert.Equal(target.Id, job.Specification.TargetConfigurationId);
+        Assert.Equal($"{target.Configuration.ModuleId}:{target.Configuration.ModuleRevision}", job.Specification.TerraformModule);
         Assert.Equal(DeploymentHealthStatus.Unknown,
             (await client.GetFromJsonAsync<System.Text.Json.JsonElement>($"/api/v1/deployments/{deployment.Id}/health")).GetProperty("status").Deserialize<DeploymentHealthStatus>());
         using var frozen = await client.PutAsJsonAsync($"/api/v1/deployments/{deployment.Id}", Definition());
@@ -257,7 +281,7 @@ public sealed class PersistenceTests(DatabaseFixture fixture) : IClassFixture<Da
         var replayed = (await retry.Content.ReadFromJsonAsync<JobResponse>())!;
         Assert.Equal(original.Id, replayed.Id);
         Assert.Equal(original.Specification.ContainerImage, replayed.Specification.ContainerImage);
-        Assert.Equal(1, replayed.Specification.Migration!.ConfigurationRevision);
+        Assert.Equal(target.Id, replayed.Specification.TargetConfigurationId);
     }
 
     [DatabaseFact]

@@ -60,6 +60,12 @@ public sealed class JobSubmissionService(
             || target.Configuration.Inputs.Keys.Except(approved.AllowedInputs).Any())
             throw Reject(RejectionKind.Conflict, "target_not_approved", "The target module is no longer approved. Update the target before submitting.");
 
+        var credentials = deployment.Definition.Application.SecretReferences.Values
+            .Concat(target.Configuration.SecretReferences.Values)
+            .Concat(new[] { deployment.Definition.Application.ImagePullSecretReference, deployment.Definition.Traffic.CredentialReference });
+        if (credentials.Any(reference => reference is not null && !reference.StartsWith("vault://", StringComparison.Ordinal)))
+            throw Reject(RejectionKind.Conflict, "vault_reference_required", "Update legacy credential references to vault://path#key before submitting a new job.");
+
         var runtime = await deployments.FindRuntimeAsync(deployment.Id, ct);
         var source = new SourceDeploymentSnapshot(
             runtime?.Provider ?? deployment.Definition.SourceProvider,

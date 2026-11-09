@@ -36,15 +36,12 @@ public class SerializationTests
     public void Complete_migration_snapshot_round_trips_without_losing_reproducible_inputs()
     {
         var request = Read<DeploymentRequested>("deployment-requested.v2.json");
-        Assert.Equal(JobTrigger.Automatic, request.Trigger);
+        Assert.Equal(DeploymentTrigger.Automatic, request.Trigger);
         Assert.NotNull(request.IncidentId);
-        var migration = Assert.IsType<MigrationSpecification>(request.Specification.Migration);
-        Assert.Equal("yandex", migration.Source.Provider);
-        Assert.Equal(2, migration.ConfigurationRevision);
-        Assert.Equal("local-simulation-v1", migration.Target.ModuleRevision);
-        Assert.Equal("secret://demo/api-key", migration.Application.SecretReferences["API_KEY"]);
-        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(Fixture("deployment-requested.v2.json")),
-            JsonSerializer.SerializeToNode(request, JsonOptions)));
+        Assert.Equal(80, request.Specification.ContainerPort);
+        Assert.Equal("local-stateless-v1:local-simulation-v1", request.Specification.TerraformModule);
+        Assert.Equal("vault://demo#api-key", request.Specification.SecretReferences!["API_KEY"]);
+        Assert.Equal(request, JsonSerializer.Deserialize<DeploymentRequested>(JsonSerializer.Serialize(request, JsonOptions), JsonOptions));
     }
 
     [Fact]
@@ -53,7 +50,7 @@ public class SerializationTests
         var status = Read<JobStatusChanged>("job-status-changed.v1.json") with
         {
             Status = JobStatus.Failed, Phase = MigrationPhase.EntrypointVerification,
-            TargetEndpoint = new Uri("https://target.example.test"), Cutover = CutoverOutcome.Uncertain,
+            TargetEndpoint = "https://target.example.test", Cutover = CutoverOutcome.Uncertain,
             ErrorCode = "entrypoint_unverified", ErrorMessage = "Traffic verification did not complete."
         };
         Assert.Equal(status, JsonSerializer.Deserialize<JobStatusChanged>(JsonSerializer.Serialize(status, JsonOptions), JsonOptions));

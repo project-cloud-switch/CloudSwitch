@@ -31,12 +31,14 @@ internal static partial class RequestValidation
             errors["definition.application"] = ["Application configuration is required."];
         else
         {
-            Check(PinnedImage().IsMatch(app.Image ?? ""), "definition.application.image", "Pin the container image using @sha256: followed by 64 hexadecimal characters.");
+            Check(!string.IsNullOrWhiteSpace(app.Image) && PinnedImage().IsMatch(app.Image) && !app.Image.EndsWith(":latest", StringComparison.OrdinalIgnoreCase), "definition.application.image", "Use an explicit image tag or a complete SHA-256 digest.");
+            Check(app.ImagePullSecretReference is null || SecretReference().IsMatch(app.ImagePullSecretReference),
+                "definition.application.imagePullSecretReference", "Use a vault://path#key registry credential reference.");
             Check(app.Port is >= 1 and <= 65535, "definition.application.port", "Port must be between 1 and 65535.");
             Check(app.CpuMillicores is >= 100 and <= 64000, "definition.application.cpuMillicores", "CPU must be between 100 and 64000 millicores.");
             Check(app.MemoryMegabytes is >= 64 and <= 262144, "definition.application.memoryMegabytes", "Memory must be between 64 and 262144 MB.");
             Check(ValidMap(app.Settings, 8192), "definition.application.settings", "Use at most 100 named settings with values of at most 8192 characters.");
-            Check(ValidSecrets(app.SecretReferences), "definition.application.secretReferences", "Use named secret:// references, never credential values.");
+            Check(ValidSecrets(app.SecretReferences), "definition.application.secretReferences", "Use named vault://path#key references, never credential values.");
             if (app.Settings is not null && app.SecretReferences is not null)
                 Check(!app.Settings.Keys.Intersect(app.SecretReferences.Keys).Any(), "definition.application", "A setting cannot also be a secret reference.");
         }
@@ -62,7 +64,7 @@ internal static partial class RequestValidation
             Check(traffic.RecordName is { Length: <= 253 } && Uri.CheckHostName(traffic.RecordName) == UriHostNameType.Dns,
                 "definition.traffic.recordName", "A DNS entrypoint name is required.");
             Check(traffic.Driver != "cloudflare-dns" || !string.IsNullOrWhiteSpace(traffic.ZoneReference)
-                && SecretReference().IsMatch(traffic.CredentialReference ?? ""), "definition.traffic", "DNS traffic control requires a zone and secret:// credential reference.");
+                && SecretReference().IsMatch(traffic.CredentialReference ?? ""), "definition.traffic", "DNS traffic control requires a zone and vault://path#key credential reference.");
         }
         return errors;
         void Check(bool valid, string field, string message) { if (!valid) errors[field] = [message]; }
@@ -77,7 +79,7 @@ internal static partial class RequestValidation
         if (!ValidMap(input.Inputs, 1024) || module is not null && input.Inputs.Keys.Except(module.AllowedInputs).Any())
             errors["inputs"] = ["Only inputs explicitly allowed by the selected module may be supplied."];
         if (!ValidSecrets(input.SecretReferences))
-            errors["secretReferences"] = ["Use named secret:// references, never credential values."];
+            errors["secretReferences"] = ["Use named vault://path#key references, never credential values."];
         return errors;
     }
 
@@ -93,8 +95,8 @@ internal static partial class RequestValidation
 
     [GeneratedRegex(@"\A[a-zA-Z_][a-zA-Z0-9_.-]{0,63}\z")]
     private static partial Regex Identifier();
-    [GeneratedRegex(@"\A[a-zA-Z0-9][a-zA-Z0-9._:/-]*@sha256:[a-fA-F0-9]{64}\z")]
+    [GeneratedRegex(@"\A[a-zA-Z0-9][a-zA-Z0-9._:/-]*(?:@sha256:[a-fA-F0-9]{64}|:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})\z")]
     private static partial Regex PinnedImage();
-    [GeneratedRegex(@"\Asecret://[a-zA-Z0-9][a-zA-Z0-9_./-]{0,500}\z")]
+    [GeneratedRegex(@"\Avault://[a-zA-Z0-9][a-zA-Z0-9_./-]{0,450}#[a-zA-Z0-9_.-]{1,64}\z")]
     private static partial Regex SecretReference();
 }

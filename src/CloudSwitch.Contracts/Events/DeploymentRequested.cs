@@ -12,9 +12,10 @@ public sealed record DeploymentRequested
     public required Guid UserId { get; init; }
     public required DeploymentSpecification Specification { get; init; }
 
-    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
-    public JobTrigger Trigger { get; init; } = JobTrigger.Manual;
+    /// <summary>Identifies whether this job was requested manually or automatically by Doctor.</summary>
+    public DeploymentTrigger Trigger { get; init; } = DeploymentTrigger.Manual;
 
-    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    /// <summary>Incident identifier when triggered automatically by Doctor.</summary>
     public Guid? IncidentId { get; init; }
 }
+

@@ -23,14 +23,14 @@ public sealed record TargetResponse(Guid Id, Guid DeploymentId, long Revision,
             target.IsDeleted, target.CreatedAt, target.UpdatedAt);
 }
 
-public sealed record JobResponse(Guid Id, Guid DeploymentId, Guid TargetConfigurationId, JobTrigger Trigger,
+public sealed record JobResponse(Guid Id, Guid DeploymentId, Guid TargetConfigurationId, DeploymentTrigger Trigger,
     Guid? IncidentId, Guid CorrelationId, JobStatus Status, MigrationPhase Phase, int Attempt, long Sequence,
     Uri? TargetEndpoint, CutoverOutcome Cutover, string? ErrorCode, string? ErrorMessage,
     DeploymentSpecification Specification, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt)
 {
     public static JobResponse From(Domain.Job job) => new(job.Id, job.DeploymentId, job.TargetConfigurationId,
-        ContractMapping.ConvertEnum<JobTrigger>(job.Trigger), job.IncidentId, job.Request.CorrelationId,
-        ContractMapping.ConvertEnum<JobStatus>(job.Status), ContractMapping.ConvertEnum<MigrationPhase>(job.Phase), job.Attempt, job.Sequence,
+        ContractMapping.ConvertEnum<DeploymentTrigger>(job.Trigger), job.IncidentId, job.Request.CorrelationId,
+        ContractMapping.ConvertEnum<JobStatus>(job.Status), job.Phase.ToContract(), job.Attempt, job.Sequence,
         job.TargetEndpoint, ContractMapping.ConvertEnum<CutoverOutcome>(job.Cutover), job.ErrorCode, job.ErrorMessage,
         job.Request.Specification.ToContract(), job.CreatedAt, job.UpdatedAt);
 }

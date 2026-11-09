@@ -66,7 +66,7 @@ public sealed class CloudSwitchDbContext(DbContextOptions<CloudSwitchDbContext> 
         jobs.Property(x => x.Phase).HasConversion<string>().HasMaxLength(32);
         jobs.Property(x => x.Cutover).HasConversion<string>().HasMaxLength(16);
         jobs.Property(x => x.IdempotencyKey).HasMaxLength(128);
-        jobs.Property(x => x.Checkpoints).HasColumnType("jsonb");
+        Json(jobs.Property(x => x.Checkpoints));
         jobs.Property(x => x.TargetEndpoint).HasConversion(uri => uri == null ? null : uri.ToString(), value => value == null ? null : new Uri(value));
         Json(jobs.Property(x => x.Request));
         jobs.HasIndex(x => x.DeploymentId).IsUnique().HasDatabaseName("UX_Jobs_ActiveDeployment")

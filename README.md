@@ -20,7 +20,7 @@ See the [architecture diagram and event flow](docs/architecture.md).
 
 ## Project status
 
-The API supports Keycloak authentication, deployment/target configuration, recovery policies, health reads and durable migration job submission through a PostgreSQL outbox. Worker execution and Notifications/SignalR are still pending; accepted jobs remain Pending until Worker processes them.
+The API supports Keycloak authentication, deployment/target configuration, recovery policies, health reads and durable migration job submission through a PostgreSQL outbox. Worker consumes RabbitMQ requests, persists fenced leases and progress in PostgreSQL, and publishes status through the transactional outbox. Its provisioning, health and traffic adapters currently simulate execution. Doctor monitoring, real cloud adapters and Notifications/SignalR remain pending.
 
 ## Run the API locally
 
@@ -33,6 +33,16 @@ dotnet run --project src/CloudSwitch.Api
 ```
 
 The API listens at `http://localhost:5080`, Keycloak at `http://localhost:8080`. See [API setup and examples](docs/api.md).
+
+## Run Worker simulation
+
+After starting local infrastructure and applying migrations, run Worker in a second terminal. Its Development launch profile explicitly enables simulation for the approved local target.
+
+```sh
+dotnet run --project src/CloudSwitch.Worker
+```
+
+Worker requires Development and `Worker:Simulation=true`. Its deterministic adapters simulate provisioning, health checks and traffic changes. The PostgreSQL job/runtime state and RabbitMQ messaging are real. Use an isolated development database for simulation.
 
 ## Build and test
 

@@ -58,3 +58,11 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store
+*.suo
+*.user
+

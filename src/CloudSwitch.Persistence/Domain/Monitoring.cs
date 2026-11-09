@@ -14,6 +14,26 @@ public sealed class DeploymentRuntime
         Provider = provider;
         Endpoint = endpoint;
     }
+
+    public static DeploymentRuntime Activate(Guid deploymentId, string provider, Uri endpoint, long revision, DateTimeOffset now)
+    {
+        DomainGuard.Identity(deploymentId, nameof(DeploymentId));
+        DomainGuard.Require(revision > 0, "Runtime revision must be positive.");
+        return new DeploymentRuntime(DomainGuard.Text(provider, nameof(Provider)), DomainGuard.Endpoint(endpoint))
+        {
+            DeploymentId = deploymentId, Revision = revision, UpdatedAt = now
+        };
+    }
+
+    public void Activate(string provider, Uri endpoint, DateTimeOffset now)
+    {
+        var nextProvider = DomainGuard.Text(provider, nameof(Provider));
+        var nextEndpoint = DomainGuard.Endpoint(endpoint);
+        Revision = checked(Revision + 1);
+        Provider = nextProvider;
+        Endpoint = nextEndpoint;
+        UpdatedAt = now;
+    }
 }
 
 public sealed class JobEvent
@@ -24,6 +44,9 @@ public sealed class JobEvent
     public JobProgress Event { get; private set; }
     private JobEvent(JobProgress @event)
         => Event = @event ?? throw new ArgumentNullException(nameof(@event));
+
+    public static JobEvent Record(JobProgress progress)
+        => new(progress) { EventId = progress.EventId, JobId = progress.JobId, Sequence = progress.Sequence };
 }
 
 public sealed class Incident
