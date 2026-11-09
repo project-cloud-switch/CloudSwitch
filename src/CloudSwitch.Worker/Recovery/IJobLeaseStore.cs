@@ -1,35 +1,16 @@
 using CloudSwitch.Contracts;
+using CloudSwitch.Contracts.Events;
 
 namespace CloudSwitch.Worker.Recovery;
 
-/// <summary>
-/// Abstraction for database lease locking, fenced ownership checkpoints,
-/// and stale job discovery.
-/// </summary>
 public interface IJobLeaseStore
 {
-    Task<JobLease?> TryAcquireOrRenewLeaseAsync(
-        Guid jobId,
-        string workerId,
-        TimeSpan leaseDuration,
+    Task<JobLease?> TryAcquireAsync(DeploymentRequested request, string workerId, TimeSpan duration,
+        int maxAttempts, CancellationToken cancellationToken = default);
+    Task<bool> RenewAsync(JobLease lease, TimeSpan duration, CancellationToken cancellationToken = default);
+    Task<JobStatusChanged?> RecordProgressAsync(JobLease lease, JobStatus status, MigrationPhase phase,
+        CutoverOutcome cutover, Uri? endpoint = null, string? errorCode = null, string? errorMessage = null, string? stateFingerprint = null,
         CancellationToken cancellationToken = default);
-
-    Task<IReadOnlyList<JobLease>> FindStaleJobsAsync(
-        DateTimeOffset asOf,
-        CancellationToken cancellationToken = default);
-
-    Task<bool> UpdateCheckpointAsync(
-        Guid jobId,
-        int expectedAttempt,
-        MigrationPhase phase,
-        string? targetEndpoint = null,
-        CancellationToken cancellationToken = default);
-
-    Task<bool> MarkTerminalAsync(
-        Guid jobId,
-        int expectedAttempt,
-        JobStatus status,
-        string? errorCode = null,
-        string? errorMessage = null,
+    Task<IReadOnlyList<DeploymentRequested>> FindStaleJobsAsync(DateTimeOffset asOf, int limit,
         CancellationToken cancellationToken = default);
 }

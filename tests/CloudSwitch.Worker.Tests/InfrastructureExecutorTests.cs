@@ -8,30 +8,16 @@ public class InfrastructureExecutorTests
 {
     private readonly DeterministicInfrastructureExecutor _executor = new();
 
-    private static ProvisioningRequest CreateValidRequest(Guid? deploymentId = null) => new()
+    private static ProvisioningRequest CreateValidRequest(Guid? deploymentId = null)
     {
-        JobId = Guid.NewGuid(),
-        DeploymentId = deploymentId ?? Guid.NewGuid(),
-        UserId = Guid.NewGuid(),
-        TargetConfigurationId = Guid.NewGuid(),
-        Provider = "selectel",
-        TerraformModule = "container-vm-selectel:v1.0.0",
-        Timeout = TimeSpan.FromMinutes(5),
-        Specification = new DeploymentSpecification
+        var request = WorkerTestContext.Request(deploymentId);
+        return new ProvisioningRequest
         {
-            Name = "demo-app",
-            ContainerImage = "cr.yandex/myorg/demo:v1.2.3@sha256:4f53cda18c21a48c",
-            Environment = "production",
-            Provider = "selectel",
-            ContainerPort = 8080,
-            CpuCores = 1.0,
-            MemoryMb = 1024,
-            SecretReferences = new Dictionary<string, string>
-            {
-                ["DB_PASSWORD"] = "vault://secret/prod/db#password"
-            }
-        }
-    };
+            JobId = request.JobId, DeploymentId = request.DeploymentId, UserId = request.UserId,
+            TargetConfigurationId = request.Specification.TargetConfigurationId!.Value, Provider = request.Specification.Provider,
+            TerraformModule = request.Specification.TerraformModule!, Specification = request.Specification
+        };
+    }
 
     [Fact]
     public async Task Provision_succeeds_with_valid_pinned_image_and_approved_module()
@@ -54,7 +40,7 @@ public class InfrastructureExecutorTests
     {
         var deploymentId = Guid.NewGuid();
         var request1 = CreateValidRequest(deploymentId);
-        var request2 = CreateValidRequest(deploymentId);
+        var request2 = request1 with { JobId = Guid.NewGuid() };
 
         var result1 = await _executor.ProvisionAsync(request1);
         var result2 = await _executor.ProvisionAsync(request2);

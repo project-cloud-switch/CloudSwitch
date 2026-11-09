@@ -16,7 +16,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="MassTransit" Version="8.5.8" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.7" />
     <ProjectReference Include="../../src/CloudSwitch.Worker/CloudSwitch.Worker.csproj" />
     <ProjectReference Include="../../src/CloudSwitch.Contracts/CloudSwitch.Contracts.csproj" />
   </ItemGroup>

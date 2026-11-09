@@ -58,10 +58,10 @@ Use separate database roles for API and Worker, and one coordinated schema-migra
 
 ## Monitoring configuration
 
-API owns the authoritative settings in PostgreSQL. Event-driven updates are the preferred direction; how Doctor replicas receive them and resume after restart is [open for discussion](discussions/doctor-configuration.md). Per-replica queues and monitoring leases are not requirements.
+API owns the authoritative settings in PostgreSQL. The [initial baseline](decisions/api-v1.md) has Doctor load active configuration on startup and poll revisions. Event-driven delivery and replica coordination are deferred; per-replica queues and monitoring leases are not requirements.
 
 Doctor checks current policy and active deployment before creating an automatic job. After verified cutover, Deployer records the new active target. Discard observations from an outdated configuration or endpoint.
 
 Run CloudSwitch and its database/broker outside the application's cloud failure domain, not alongside the main application. Recovery must remain possible when that cloud is unavailable.
 
-The diagram describes the agreed design. Contracts and tests exist; the running services and complete migration schema are still pending. See [contracts](contracts.md) and [migration model](domain-model.md).
+The [working API](api.md), shared schema/migrations, contracts and tests exist. Worker execution has PostgreSQL/RabbitMQ integration and explicit local simulation adapters. Real cloud adapters, Doctor monitoring and Notifications remain pending. See [contracts](contracts.md) and [migration model](domain-model.md).

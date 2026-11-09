@@ -1,294 +1,127 @@
+using System.Text.Json;
 using CloudSwitch.Contracts;
 using CloudSwitch.Contracts.Events;
 using CloudSwitch.Worker.Infrastructure;
 using CloudSwitch.Worker.Orchestration;
-using CloudSwitch.Worker.Recovery;
-using MassTransit;
-using MassTransit.Testing;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace CloudSwitch.Worker.Tests;
 
-public class MigrationOrchestratorTests
+public sealed class MigrationOrchestratorTests
 {
-    private static DeploymentRequested CreateValidDeploymentRequest() => new()
-    {
-        EventId = Guid.NewGuid(),
-        CorrelationId = Guid.NewGuid(),
-        OccurredAt = DateTimeOffset.UtcNow,
-        JobId = Guid.NewGuid(),
-        DeploymentId = Guid.NewGuid(),
-        UserId = Guid.NewGuid(),
-        Trigger = DeploymentTrigger.Automatic,
-        IncidentId = Guid.NewGuid(),
-        Specification = new DeploymentSpecification
-        {
-            Name = "payments",
-            ContainerImage = "docker.io/myorg/pay:1.0.0@sha256:abc12345",
-            Environment = "production",
-            Provider = "selectel",
-            ContainerPort = 8080,
-            TargetConfigurationId = Guid.NewGuid(),
-            TerraformModule = "container-vm-selectel:v1.0.0",
-            EntrypointDomain = "pay.example.com",
-            HealthCheck = new HealthCheckPolicy
-            {
-                Path = "/healthz",
-                IntervalSeconds = 2,
-                TimeoutSeconds = 5,
-                FailureThreshold = 3,
-                RecoveryThreshold = 2
-            }
-        }
-    };
-
     [Fact]
-    public async Task Happy_path_completes_all_four_phases_and_increments_sequence()
+    public async Task Happy_path_completes_all_phases_with_monotonic_sequence_and_original_correlation()
     {
-        await using var provider = new ServiceCollection()
-            .AddMassTransitTestHarness()
-            .BuildServiceProvider(true);
-
-        var harness = provider.GetRequiredService<ITestHarness>();
-        await harness.Start();
-
-        var executor = new DeterministicInfrastructureExecutor();
-        var healthValidator = new DeterministicHealthValidator(shouldSucceed: true);
-        var routingService = new DeterministicTrafficRoutingService(shouldCutoverSucceed: true, shouldVerifySucceed: true);
-
-        var orchestrator = new MigrationOrchestrator(executor, healthValidator, routingService, harness.Bus);
-        var request = CreateValidDeploymentRequest();
-
-        var outcome = await orchestrator.ExecuteMigrationAsync(request, attempt: 1);
-
+        await using var context = await WorkerTestContext.StartAsync();
+        var request = WorkerTestContext.Request();
+        context.Store.RegisterJob(request);
+        var outcome = await context.Orchestrator().ExecuteMigrationAsync(request);
         Assert.True(outcome.IsSuccess);
         Assert.Equal(JobStatus.Succeeded, outcome.FinalStatus);
-        Assert.Equal(MigrationPhase.Completed, outcome.FinalPhase);
-        Assert.NotNull(outcome.TargetEndpoint);
         Assert.Equal("https://pay.example.com", outcome.PublicEntrypoint);
-        Assert.Equal(5, outcome.LastSequence);
+        var events = context.Harness.Published.Select<JobStatusChanged>().Select(item => item.Context.Message).ToList();
+        Assert.Equal(new[] { MigrationPhase.Provisioning, MigrationPhase.TargetValidation, MigrationPhase.TrafficCutover,
+            MigrationPhase.EntrypointVerification, MigrationPhase.Completed }, events.Select(item => item.Phase));
+        Assert.Equal(new long[] { 1, 2, 3, 4, 5 }, events.Select(item => item.Sequence));
+        Assert.All(events, item => Assert.Equal(request.CorrelationId, item.CorrelationId));
+        Assert.Equal(CutoverOutcome.Verified, events.Last().Cutover);
+    }
 
-        var publishedEvents = harness.Published.Select<JobStatusChanged>().ToList();
-        Assert.Equal(5, publishedEvents.Count);
-
-        var phases = publishedEvents.Select(x => x.Context.Message.Phase).ToList();
-        Assert.Equal(new[]
-        {
-            MigrationPhase.Provisioning,
-            MigrationPhase.TargetValidation,
-            MigrationPhase.TrafficCutover,
-            MigrationPhase.EntrypointVerification,
-            MigrationPhase.Completed
-        }, phases);
-
-        // Verify strictly increasing sequence 1..5
-        var sequences = publishedEvents.Select(x => x.Context.Message.Sequence).ToList();
-        Assert.Equal(new long[] { 1, 2, 3, 4, 5 }, sequences);
+    [Fact]
+    public async Task Duplicate_delivery_does_not_execute_a_terminal_job_twice()
+    {
+        await using var context = await WorkerTestContext.StartAsync();
+        var request = WorkerTestContext.Request();
+        context.Store.RegisterJob(request);
+        var orchestrator = context.Orchestrator();
+        Assert.True((await orchestrator.ExecuteMigrationAsync(request)).IsSuccess);
+        Assert.Equal("JOB_NOT_ACQUIRED", (await orchestrator.ExecuteMigrationAsync(request)).ErrorCode);
+        Assert.Equal(5, context.Harness.Published.Select<JobStatusChanged>().Count());
     }
 
     [Fact]
     public async Task Target_health_failure_prevents_traffic_cutover()
     {
-        await using var provider = new ServiceCollection()
-            .AddMassTransitTestHarness()
-            .BuildServiceProvider(true);
-
-        var harness = provider.GetRequiredService<ITestHarness>();
-        await harness.Start();
-
-        var executor = new DeterministicInfrastructureExecutor();
-        // Target fails health validation:
-        var healthValidator = new DeterministicHealthValidator(shouldSucceed: false);
-        var routingService = new DeterministicTrafficRoutingService();
-
-        var orchestrator = new MigrationOrchestrator(executor, healthValidator, routingService, harness.Bus);
-        var request = CreateValidDeploymentRequest();
-
-        var outcome = await orchestrator.ExecuteMigrationAsync(request);
-
+        await using var context = await WorkerTestContext.StartAsync();
+        var request = WorkerTestContext.Request();
+        context.Store.RegisterJob(request);
+        var outcome = await context.Orchestrator(health: new DeterministicHealthValidator(false)).ExecuteMigrationAsync(request);
         Assert.False(outcome.IsSuccess);
-        Assert.Equal(JobStatus.Failed, outcome.FinalStatus);
-        Assert.Equal(MigrationPhase.TargetValidation, outcome.FinalPhase);
         Assert.Equal("TARGET_HEALTH_CHECK_FAILED", outcome.ErrorCode);
-        Assert.Contains("cutover was prevented", outcome.ErrorMessage);
-
-        var publishedEvents = harness.Published.Select<JobStatusChanged>().ToList();
-        Assert.Equal(3, publishedEvents.Count);
-
-        // TrafficCutover and EntrypointVerification MUST NOT have been reached
-        Assert.DoesNotContain(publishedEvents, e => e.Context.Message.Phase == MigrationPhase.TrafficCutover);
-        Assert.DoesNotContain(publishedEvents, e => e.Context.Message.Phase == MigrationPhase.EntrypointVerification);
-        Assert.DoesNotContain(publishedEvents, e => e.Context.Message.Phase == MigrationPhase.Completed);
+        Assert.DoesNotContain(context.Harness.Published.Select<JobStatusChanged>(), item => item.Context.Message.Phase == MigrationPhase.TrafficCutover);
     }
 
     [Fact]
-    public async Task Provisioning_failure_halts_immediately()
+    public async Task Provisioning_failure_halts_before_health_or_cutover()
     {
-        await using var provider = new ServiceCollection()
-            .AddMassTransitTestHarness()
-            .BuildServiceProvider(true);
-
-        var harness = provider.GetRequiredService<ITestHarness>();
-        await harness.Start();
-
-        var executor = new DeterministicInfrastructureExecutor();
-        var healthValidator = new DeterministicHealthValidator();
-        var routingService = new DeterministicTrafficRoutingService();
-
-        var orchestrator = new MigrationOrchestrator(executor, healthValidator, routingService, harness.Bus);
-        var request = CreateValidDeploymentRequest();
-        // Invalid module forces provisioning failure
-        var spec = request.Specification with { TerraformModule = "unapproved-module" };
-        var badRequest = request with { Specification = spec };
-
-        var outcome = await orchestrator.ExecuteMigrationAsync(badRequest);
-
-        Assert.False(outcome.IsSuccess);
-        Assert.Equal(JobStatus.Failed, outcome.FinalStatus);
+        await using var context = await WorkerTestContext.StartAsync();
+        var request = WorkerTestContext.Request();
+        request = request with { Specification = request.Specification with { TerraformModule = "unapproved-module" } };
+        context.Store.RegisterJob(request);
+        var outcome = await context.Orchestrator().ExecuteMigrationAsync(request);
+        Assert.Equal("PROVISIONING_FAILED", outcome.ErrorCode);
         Assert.Equal(MigrationPhase.Provisioning, outcome.FinalPhase);
-        Assert.Equal("INVALID_MODULE", outcome.ErrorCode);
-
-        var publishedEvents = harness.Published.Select<JobStatusChanged>().ToList();
-        Assert.Equal(2, publishedEvents.Count);
-        Assert.Equal(JobStatus.Failed, publishedEvents.Last().Context.Message.Status);
+        Assert.Equal(2, context.Harness.Published.Select<JobStatusChanged>().Count());
     }
 
     [Fact]
-    public async Task Missing_target_configuration_fails_early_without_provisioning()
+    public async Task Legacy_snapshot_fails_without_provisioning()
     {
-        await using var provider = new ServiceCollection()
-            .AddMassTransitTestHarness()
-            .BuildServiceProvider(true);
-
-        var harness = provider.GetRequiredService<ITestHarness>();
-        await harness.Start();
-
-        var executor = new DeterministicInfrastructureExecutor();
-        var healthValidator = new DeterministicHealthValidator();
-        var routingService = new DeterministicTrafficRoutingService();
-
-        var orchestrator = new MigrationOrchestrator(executor, healthValidator, routingService, harness.Bus);
-        var request = CreateValidDeploymentRequest();
-        var spec = request.Specification with { TargetConfigurationId = null };
-        var badRequest = request with { Specification = spec };
-
-        var outcome = await orchestrator.ExecuteMigrationAsync(badRequest);
-
-        Assert.False(outcome.IsSuccess);
-        Assert.Equal(JobStatus.Failed, outcome.FinalStatus);
+        await using var context = await WorkerTestContext.StartAsync();
+        var request = WorkerTestContext.Request();
+        request = request with { Specification = request.Specification with { TargetConfigurationId = null } };
+        context.Store.RegisterJob(request);
+        var outcome = await context.Orchestrator().ExecuteMigrationAsync(request);
+        Assert.Equal("MISSING_MIGRATION_SNAPSHOT", outcome.ErrorCode);
         Assert.Equal(MigrationPhase.Pending, outcome.FinalPhase);
-        Assert.Equal("MISSING_TARGET_CONFIGURATION", outcome.ErrorCode);
-
-        var publishedEvents = harness.Published.Select<JobStatusChanged>().ToList();
-        var failedEvent = Assert.Single(publishedEvents);
-        Assert.Equal("MISSING_TARGET_CONFIGURATION", failedEvent.Context.Message.ErrorCode);
     }
 
     [Fact]
-    public async Task Pre_execution_cancellation_marks_job_failed_cleanly()
+    public async Task Host_cancellation_leaves_job_available_for_redelivery()
     {
-        await using var provider = new ServiceCollection()
-            .AddMassTransitTestHarness()
-            .BuildServiceProvider(true);
-
-        var harness = provider.GetRequiredService<ITestHarness>();
-        await harness.Start();
-
-        var executor = new DeterministicInfrastructureExecutor();
-        var healthValidator = new DeterministicHealthValidator();
-        var routingService = new DeterministicTrafficRoutingService();
-
-        var orchestrator = new MigrationOrchestrator(executor, healthValidator, routingService, harness.Bus);
-        var request = CreateValidDeploymentRequest();
-
-        using var cts = new CancellationTokenSource();
-        cts.Cancel(); // Pre-cancelled
-
-        var outcome = await orchestrator.ExecuteMigrationAsync(request, cancellationToken: cts.Token);
-
-        Assert.False(outcome.IsSuccess);
-        Assert.Equal(JobStatus.Failed, outcome.FinalStatus);
-        Assert.Equal("OPERATION_CANCELLED", outcome.ErrorCode);
+        await using var context = await WorkerTestContext.StartAsync();
+        var request = WorkerTestContext.Request();
+        context.Store.RegisterJob(request);
+        var orchestrator = context.Orchestrator();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => orchestrator.ExecuteMigrationAsync(request, cancellation.Token));
+        Assert.Empty(context.Harness.Published.Select<JobStatusChanged>());
+        context.Clock.Advance(TimeSpan.FromMinutes(5));
+        Assert.True((await orchestrator.ExecuteMigrationAsync(request)).IsSuccess);
     }
 
     [Fact]
-    public async Task Unexpected_exception_during_execution_publishes_failed_event_with_sanitized_error()
+    public async Task Unexpected_exception_exposes_no_raw_secrets_in_events_or_logs()
     {
-        await using var provider = new ServiceCollection()
-            .AddMassTransitTestHarness()
-            .BuildServiceProvider(true);
-
-        var harness = provider.GetRequiredService<ITestHarness>();
-        await harness.Start();
-
-        var throwingExecutor = new ThrowingInfrastructureExecutor();
-        var healthValidator = new DeterministicHealthValidator();
-        var routingService = new DeterministicTrafficRoutingService();
-
-        var orchestrator = new MigrationOrchestrator(throwingExecutor, healthValidator, routingService, harness.Bus);
-        var request = CreateValidDeploymentRequest();
-
-        var outcome = await orchestrator.ExecuteMigrationAsync(request);
-
-        Assert.False(outcome.IsSuccess);
-        Assert.Equal(JobStatus.Failed, outcome.FinalStatus);
+        await using var context = await WorkerTestContext.StartAsync();
+        var request = WorkerTestContext.Request();
+        context.Store.RegisterJob(request);
+        var logger = new CaptureLogger();
+        var outcome = await context.Orchestrator(executor: new ThrowingExecutor(), logger: logger).ExecuteMigrationAsync(request);
         Assert.Equal("UNHANDLED_EXECUTION_ERROR", outcome.ErrorCode);
-        Assert.Contains(OutputSanitizer.RedactedMask, outcome.ErrorMessage);
-
-        var publishedEvents = harness.Published.Select<JobStatusChanged>().ToList();
-        var failedEvent = publishedEvents.Last().Context.Message;
-        Assert.Equal(JobStatus.Failed, failedEvent.Status);
-        Assert.Equal("UNHANDLED_EXECUTION_ERROR", failedEvent.ErrorCode);
+        Assert.DoesNotContain(ThrowingExecutor.Secret, JsonSerializer.Serialize(outcome));
+        Assert.DoesNotContain(ThrowingExecutor.Secret, string.Join("\n", logger.Messages));
+        Assert.All(context.Harness.Published.Select<JobStatusChanged>(), item =>
+            Assert.DoesNotContain(ThrowingExecutor.Secret, JsonSerializer.Serialize(item.Context.Message)));
     }
 
-    [Fact]
-    public async Task Orchestrator_updates_lease_checkpoints_and_terminal_status_when_store_provided()
+    private sealed class ThrowingExecutor : IInfrastructureExecutor
     {
-        await using var provider = new ServiceCollection()
-            .AddMassTransitTestHarness()
-            .BuildServiceProvider(true);
-
-        var harness = provider.GetRequiredService<ITestHarness>();
-        await harness.Start();
-
-        var executor = new DeterministicInfrastructureExecutor();
-        var healthValidator = new DeterministicHealthValidator();
-        var routingService = new DeterministicTrafficRoutingService();
-        var leaseStore = new InMemoryJobLeaseStore();
-
-        var request = CreateValidDeploymentRequest();
-        var initialLease = new JobLease
-        {
-            JobId = request.JobId,
-            DeploymentId = request.DeploymentId,
-            UserId = request.UserId,
-            WorkerId = "worker-1",
-            Attempt = 1,
-            LeaseExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5),
-            Status = JobStatus.Pending,
-            CurrentPhase = MigrationPhase.Pending,
-            Specification = request.Specification
-        };
-        leaseStore.RegisterJob(initialLease);
-
-        var orchestrator = new MigrationOrchestrator(executor, healthValidator, routingService, harness.Bus, leaseStore);
-
-        var outcome = await orchestrator.ExecuteMigrationAsync(request, attempt: 1);
-
-        Assert.True(outcome.IsSuccess);
-
-        // Verify the lease in store is terminal Succeeded and not stale
-        var stale = await leaseStore.FindStaleJobsAsync(DateTimeOffset.UtcNow.AddHours(1));
-        Assert.DoesNotContain(stale, x => x.JobId == request.JobId);
+        public const string Secret = "synthetic-review-password";
+        public Task<ProvisioningResult> ProvisionAsync(ProvisioningRequest request, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException($"password='{Secret}'");
+        public Task<ReconciliationResult> ReconcileAsync(ReconciliationRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(ReconciliationResult.NotFound());
     }
 
-    private sealed class ThrowingInfrastructureExecutor : IInfrastructureExecutor
+    private sealed class CaptureLogger : ILogger<MigrationOrchestrator>
     {
-        public Task<ProvisioningResult> ProvisionAsync(ProvisioningRequest request, CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Fatal crash with password='SuperSecretPassword123'");
-
-        public Task<ReconciliationResult> ReconcileAsync(ReconciliationRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(ReconciliationResult.NotFound());
+        public List<string> Messages { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel level) => true;
+        public void Log<TState>(LogLevel level, EventId id, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Messages.Add(formatter(state, exception) + exception?.ToString());
     }
 }

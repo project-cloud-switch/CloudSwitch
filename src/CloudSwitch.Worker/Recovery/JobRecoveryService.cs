@@ -1,136 +1,35 @@
-using CloudSwitch.Contracts;
-using CloudSwitch.Contracts.Events;
-using CloudSwitch.Worker.Infrastructure;
 using CloudSwitch.Worker.Orchestration;
-using MassTransit;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace CloudSwitch.Worker.Recovery;
 
-public sealed record RecoveryExecutionResult
+public sealed class JobRecoveryService(IJobLeaseStore store, IMigrationOrchestrator orchestrator,
+    IOptions<WorkerOptions> options, ILogger<JobRecoveryService> logger) : BackgroundService
 {
-    public required Guid JobId { get; init; }
-    public required bool Recovered { get; init; }
-    public string? Reason { get; init; }
-    public MigrationOutcome? Outcome { get; init; }
-}
-
-/// <summary>
-/// Discovers stale running jobs whose leases expired, fences out old workers,
-/// reconciles actual Terraform and routing state, and safely resumes execution.
-/// </summary>
-public sealed class JobRecoveryService
-{
-    private readonly IJobLeaseStore _leaseStore;
-    private readonly IInfrastructureExecutor _executor;
-    private readonly IMigrationOrchestrator _orchestrator;
-    private readonly IPublishEndpoint _publishEndpoint;
-    private readonly ILogger<JobRecoveryService> _logger;
-
-    public JobRecoveryService(
-        IJobLeaseStore leaseStore,
-        IInfrastructureExecutor executor,
-        IMigrationOrchestrator orchestrator,
-        IPublishEndpoint publishEndpoint,
-        ILogger<JobRecoveryService>? logger = null)
+    public async Task RecoverStaleJobsAsync(CancellationToken cancellationToken = default)
     {
-        _leaseStore = leaseStore;
-        _executor = executor;
-        _orchestrator = orchestrator;
-        _publishEndpoint = publishEndpoint;
-        _logger = logger ?? NullLogger<JobRecoveryService>.Instance;
+        var requests = await store.FindStaleJobsAsync(DateTimeOffset.UtcNow, 100, cancellationToken);
+        foreach (var request in requests)
+            await orchestrator.ExecuteMigrationAsync(request, cancellationToken);
     }
 
-    public async Task<IReadOnlyList<RecoveryExecutionResult>> RecoverStaleJobsAsync(
-        string recoveryWorkerId,
-        TimeSpan leaseDuration,
-        CancellationToken cancellationToken = default)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var now = DateTimeOffset.UtcNow;
-        var staleJobs = await _leaseStore.FindStaleJobsAsync(now, cancellationToken).ConfigureAwait(false);
-        var results = new List<RecoveryExecutionResult>();
-
-        foreach (var job in staleJobs)
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(options.Value.RecoveryIntervalSeconds));
+        do
         {
-            _logger.LogInformation("Attempting recovery for stale JobId={JobId}, Attempt={Attempt}", job.JobId, job.Attempt);
-
-            var lease = await _leaseStore.TryAcquireOrRenewLeaseAsync(job.JobId, recoveryWorkerId, leaseDuration, cancellationToken).ConfigureAwait(false);
-            if (lease == null)
+            try
             {
-                results.Add(new RecoveryExecutionResult
-                {
-                    JobId = job.JobId,
-                    Recovered = false,
-                    Reason = job.HasExhaustedRetries
-                        ? "RETRY_LIMIT_EXHAUSTED"
-                        : "Lease could not be acquired (taken by another worker or retry limit reached)."
-                });
-                continue;
+                await RecoverStaleJobsAsync(stoppingToken);
             }
-
-            // Reconcile actual target infrastructure state before repeating external calls
-            var reconcileResult = await _executor.ReconcileAsync(new ReconciliationRequest
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+            catch (Exception)
             {
-                DeploymentId = lease.DeploymentId,
-                Provider = lease.Specification.Provider,
-                TerraformModule = lease.Specification.TerraformModule ?? "container-vm-selectel:v1.0.0",
-                ExpectedTargetEndpoint = lease.TargetEndpoint
-            }, cancellationToken).ConfigureAwait(false);
-
-            _logger.LogInformation(
-                "Job {JobId} reconciliation: Exists={Exists}, ObservedEndpoint={Endpoint}",
-                lease.JobId, reconcileResult.Exists, reconcileResult.ObservedTargetEndpoint);
-
-            if (!string.IsNullOrEmpty(reconcileResult.ErrorCode))
-            {
-                const string reason = "CONFLICTING_TARGET_STATE";
-                var errMsg = $"Reconciliation detected conflicting target state: {reconcileResult.SanitizedMessage}";
-                await _leaseStore.MarkTerminalAsync(
-                    lease.JobId, lease.Attempt, JobStatus.Failed, reason, errMsg, cancellationToken).ConfigureAwait(false);
-
-                results.Add(new RecoveryExecutionResult
-                {
-                    JobId = lease.JobId,
-                    Recovered = false,
-                    Reason = reason
-                });
-                continue;
+                logger.LogError("Stale job recovery failed; it will retry on the next scan.");
             }
-
-            var deploymentRequest = new DeploymentRequested
-            {
-                EventId = Guid.NewGuid(),
-                CorrelationId = Guid.NewGuid(),
-                OccurredAt = DateTimeOffset.UtcNow,
-                JobId = lease.JobId,
-                DeploymentId = lease.DeploymentId,
-                UserId = lease.UserId,
-                Trigger = DeploymentTrigger.Automatic,
-                Specification = lease.Specification
-            };
-
-            var outcome = await _orchestrator.ExecuteMigrationAsync(deploymentRequest, lease.Attempt, cancellationToken).ConfigureAwait(false);
-
-            if (outcome.IsSuccess)
-            {
-                await _leaseStore.MarkTerminalAsync(
-                    lease.JobId, lease.Attempt, JobStatus.Succeeded, cancellationToken: cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                await _leaseStore.MarkTerminalAsync(
-                    lease.JobId, lease.Attempt, JobStatus.Failed, outcome.ErrorCode, outcome.ErrorMessage, cancellationToken).ConfigureAwait(false);
-            }
-
-            results.Add(new RecoveryExecutionResult
-            {
-                JobId = lease.JobId,
-                Recovered = outcome.IsSuccess,
-                Outcome = outcome
-            });
         }
-
-        return results;
+        while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 }

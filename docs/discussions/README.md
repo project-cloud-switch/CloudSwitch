@@ -1,6 +1,8 @@
 # Contract readiness discussions
 
-Goal: agree on a small contract baseline that API, Worker and Notifications can implement independently. These notes are open questions, not finalized schemas.
+The agreed [deployment request](deployment-request.md) and [job progress](job-progress.md) discussions define the shared message contracts. The [API v1 implementation decisions](../decisions/api-v1.md) describe schema ownership and integration. Other notes retain open questions for review.
+
+Goal: agree on a small contract baseline that API, Worker and Notifications can implement independently. Each discussion records its own agreement status.
 
 Read [architecture](../architecture.md), [current contracts](../contracts.md) and [domain model](../domain-model.md) before the meeting.
 

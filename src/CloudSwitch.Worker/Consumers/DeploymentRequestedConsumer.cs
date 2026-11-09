@@ -32,7 +32,11 @@ public sealed class DeploymentRequestedConsumer : IConsumer<DeploymentRequested>
 
         var outcome = await _orchestrator.ExecuteMigrationAsync(request, context.CancellationToken).ConfigureAwait(false);
 
-        if (outcome.IsSuccess)
+        if (outcome.ErrorCode is "JOB_NOT_ACQUIRED" or "LEASE_LOST")
+        {
+            _logger.LogInformation("Skipped duplicate or stale execution for JobId={JobId}.", request.JobId);
+        }
+        else if (outcome.IsSuccess)
         {
             _logger.LogInformation(
                 "Migration Succeeded for JobId={JobId}. Target={TargetEndpoint}, Entrypoint={PublicEntrypoint}",

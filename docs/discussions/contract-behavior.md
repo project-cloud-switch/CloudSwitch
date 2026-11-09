@@ -1,6 +1,6 @@
 # Discussion: Contract behavior
 
-**Status: open.** Suggested reviewers: Vlad and Stepan. Related tasks: [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2), [#5](https://github.com/project-cloud-switch/CloudSwitch/issues/5), [#14](https://github.com/project-cloud-switch/CloudSwitch/issues/14).
+**Status: API validation, submission races and incident deduplication implemented; Worker transition/retry behavior uses fenced PostgreSQL leases and a transactional outbox with simulation adapters.** See [API v1 decisions](../decisions/api-v1.md). Suggested reviewers: Vlad and Stepan. Related tasks: [#2](https://github.com/project-cloud-switch/CloudSwitch/issues/2), [#5](https://github.com/project-cloud-switch/CloudSwitch/issues/5), [#14](https://github.com/project-cloud-switch/CloudSwitch/issues/14).
 
 ## Decide
 

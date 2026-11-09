@@ -14,7 +14,7 @@ Remaining decisions and the meeting agenda are in [contract readiness discussion
 
 Doctor and Deployer run inside Worker. See the [architecture diagram](architecture.md).
 
-Job events carry `EventId`, `CorrelationId`, `OccurredAt`, `JobId`, `DeploymentId` and `UserId`. The current snapshot contains only `Name`, `ContainerImage`, `Environment` and `Provider`. Statuses are `Pending`, `Running`, `Succeeded` and `Failed`, serialized as strings.
+Job events carry `EventId`, `CorrelationId`, `OccurredAt`, `JobId`, `DeploymentId` and `UserId`. The submission snapshot includes the agreed migration fields described below. Statuses are `Pending`, `Running`, `Succeeded` and `Failed`, serialized as strings.
 
 ## Health monitoring and recovery
 
@@ -66,4 +66,4 @@ Credentials are referenced, never embedded. Services validate inputs and ownersh
 
 Deployer replicas share the request queue. Notifications has separate health/status queues; it does not compete with Deployer for requests. Create bindings before publishing; configure bounded retries and error queues in each service.
 
-Current tests verify JSON compatibility, message identities, delivery and correlation using MassTransit 8.5.8 in memory. Broker provisioning and the complete migration remain service integration work.
+Tests verify JSON compatibility, message identities, delivery and correlation using MassTransit 8.5.8. Optional isolated PostgreSQL/RabbitMQ tests cover API outbox delivery to Worker, persisted progress, transactional rollback and lease fencing. Local execution uses deterministic simulation adapters. Cloud provisioning and real probe/DNS adapters remain pending.

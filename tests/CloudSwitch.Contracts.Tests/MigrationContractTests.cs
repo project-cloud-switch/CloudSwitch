@@ -228,4 +228,17 @@ public class MigrationContractTests
         Assert.Equal(specWithNullEnv, specWithEmptyEnv);
         Assert.Equal(specWithNullEnv.GetHashCode(), specWithEmptyEnv.GetHashCode());
     }
+
+    [Fact]
+    public void Dictionary_equality_uses_ordinal_keys_regardless_of_input_comparer()
+    {
+        var first = new DeploymentSpecification
+        {
+            Name = "api", ContainerImage = "nginx:1.27", Environment = "test", Provider = "local",
+            Env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["KEY"] = "value" }
+        };
+        var second = first with { Env = new Dictionary<string, string> { ["key"] = "value" } };
+        Assert.NotEqual(first, second);
+        Assert.NotEqual(second, first);
+    }
 }

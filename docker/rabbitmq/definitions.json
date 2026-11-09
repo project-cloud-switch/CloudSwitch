@@ -1,0 +1,30 @@
+{
+  "users": [
+    {"name": "cloudswitch", "password_hash": "Q1N2MQHYodYNDr+cmUYc/lCYV9vVoOIKg3V31NUp7RQPSFyi", "hashing_algorithm": "rabbit_password_hashing_sha256", "tags": ["administrator"]}
+  ],
+  "permissions": [
+    {"user": "cloudswitch", "vhost": "/", "configure": ".*", "write": ".*", "read": ".*"}
+  ],
+  "vhosts": [{"name": "/"}],
+  "exchanges": [
+    {"name": "CloudSwitch.Contracts.Events:DeploymentRequested", "vhost": "/", "type": "fanout", "durable": true, "auto_delete": false, "internal": false, "arguments": {}},
+    {"name": "CloudSwitch.Contracts.Events:JobStatusChanged", "vhost": "/", "type": "fanout", "durable": true, "auto_delete": false, "internal": false, "arguments": {}},
+    {"name": "CloudSwitch.Contracts.Events:DeploymentHealthChanged", "vhost": "/", "type": "fanout", "durable": true, "auto_delete": false, "internal": false, "arguments": {}},
+    {"name": "cloudswitch-worker-deployment-requested", "vhost": "/", "type": "fanout", "durable": true, "auto_delete": false, "internal": false, "arguments": {}},
+    {"name": "cloudswitch-notifications-job-status-changed", "vhost": "/", "type": "fanout", "durable": true, "auto_delete": false, "internal": false, "arguments": {}},
+    {"name": "cloudswitch-notifications-deployment-health-changed", "vhost": "/", "type": "fanout", "durable": true, "auto_delete": false, "internal": false, "arguments": {}}
+  ],
+  "queues": [
+    {"name": "cloudswitch-worker-deployment-requested", "vhost": "/", "durable": true, "auto_delete": false, "arguments": {}},
+    {"name": "cloudswitch-notifications-job-status-changed", "vhost": "/", "durable": true, "auto_delete": false, "arguments": {}},
+    {"name": "cloudswitch-notifications-deployment-health-changed", "vhost": "/", "durable": true, "auto_delete": false, "arguments": {}}
+  ],
+  "bindings": [
+    {"source": "CloudSwitch.Contracts.Events:DeploymentRequested", "vhost": "/", "destination": "cloudswitch-worker-deployment-requested", "destination_type": "exchange", "routing_key": "", "arguments": {}},
+    {"source": "cloudswitch-worker-deployment-requested", "vhost": "/", "destination": "cloudswitch-worker-deployment-requested", "destination_type": "queue", "routing_key": "", "arguments": {}},
+    {"source": "CloudSwitch.Contracts.Events:JobStatusChanged", "vhost": "/", "destination": "cloudswitch-notifications-job-status-changed", "destination_type": "exchange", "routing_key": "", "arguments": {}},
+    {"source": "cloudswitch-notifications-job-status-changed", "vhost": "/", "destination": "cloudswitch-notifications-job-status-changed", "destination_type": "queue", "routing_key": "", "arguments": {}},
+    {"source": "CloudSwitch.Contracts.Events:DeploymentHealthChanged", "vhost": "/", "destination": "cloudswitch-notifications-deployment-health-changed", "destination_type": "exchange", "routing_key": "", "arguments": {}},
+    {"source": "cloudswitch-notifications-deployment-health-changed", "vhost": "/", "destination": "cloudswitch-notifications-deployment-health-changed", "destination_type": "queue", "routing_key": "", "arguments": {}}
+  ]
+}

@@ -25,5 +25,7 @@ public sealed record JobStatusChanged
 
     /// <summary>Direct endpoint of the target container once provisioned, before DNS cutover.</summary>
     public string? TargetEndpoint { get; init; }
+
+    public CutoverOutcome? Cutover { get; init; }
 }
 

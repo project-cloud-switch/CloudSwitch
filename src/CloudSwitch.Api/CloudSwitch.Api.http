@@ -1,0 +1,14 @@
+@baseUrl = http://localhost:5080
+@accessToken = replace-with-an-access-token
+
+GET {{baseUrl}}/health/live
+
+###
+GET {{baseUrl}}/health/ready
+
+###
+GET {{baseUrl}}/openapi/v1.json
+
+###
+GET {{baseUrl}}/api/v1/me
+Authorization: Bearer {{accessToken}}

@@ -3,189 +3,139 @@ using CloudSwitch.Contracts.Events;
 using CloudSwitch.Worker.Infrastructure;
 using CloudSwitch.Worker.Orchestration;
 using CloudSwitch.Worker.Recovery;
-using MassTransit;
-using MassTransit.Testing;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace CloudSwitch.Worker.Tests;
 
-public class JobRecoveryTests
+public sealed class JobRecoveryTests
 {
-    private static JobLease CreateRunningJobLease(
-        Guid? jobId = null,
-        DateTimeOffset? expiresAt = null,
-        int attempt = 1,
-        int maxAttempts = 3) => new()
+    [Fact]
+    public async Task Active_lease_cannot_be_acquired_twice_even_by_the_same_worker()
     {
-        JobId = jobId ?? Guid.NewGuid(),
-        DeploymentId = Guid.NewGuid(),
-        UserId = Guid.NewGuid(),
-        WorkerId = "worker-alpha",
-        Attempt = attempt,
-        MaxAttempts = maxAttempts,
-        Status = JobStatus.Running,
-        CurrentPhase = MigrationPhase.Provisioning,
-        LeaseExpiresAt = expiresAt ?? DateTimeOffset.UtcNow.AddMinutes(5),
-        Specification = new DeploymentSpecification
+        await using var context = await WorkerTestContext.StartAsync();
+        var request = WorkerTestContext.Request();
+        context.Store.RegisterJob(request);
+        Assert.NotNull(await context.Store.TryAcquireAsync(request, "worker", TimeSpan.FromMinutes(2), 3));
+        Assert.Null(await context.Store.TryAcquireAsync(request, "worker", TimeSpan.FromMinutes(2), 3));
+        Assert.Null(await context.Store.TryAcquireAsync(request, "another", TimeSpan.FromMinutes(2), 3));
+    }
+
+    [Fact]
+    public async Task Expired_lease_acquisition_increments_attempt_and_fence_for_the_same_owner()
+    {
+        await using var context = await WorkerTestContext.StartAsync();
+        var request = WorkerTestContext.Request();
+        context.Store.RegisterJob(request);
+        var old = Assert.IsType<JobLease>(await context.Store.TryAcquireAsync(request, "worker", TimeSpan.FromSeconds(3), 3));
+        context.Clock.Advance(TimeSpan.FromSeconds(4));
+        var next = Assert.IsType<JobLease>(await context.Store.TryAcquireAsync(request, "worker", TimeSpan.FromMinutes(2), 3));
+        Assert.Equal(old.Attempt + 1, next.Attempt);
+        Assert.True(next.FencingToken > old.FencingToken);
+        Assert.Null(await context.Store.RecordProgressAsync(old, JobStatus.Running, MigrationPhase.TrafficCutover, CutoverOutcome.Uncertain));
+        Assert.False(await context.Store.RenewAsync(old, TimeSpan.FromMinutes(2)));
+    }
+
+    [Fact]
+    public async Task Retry_exhaustion_records_one_terminal_failure()
+    {
+        await using var context = await WorkerTestContext.StartAsync();
+        var request = WorkerTestContext.Request();
+        context.Store.RegisterJob(request, attempt: 3, status: JobStatus.Running, expiresAt: context.Clock.GetUtcNow().AddMinutes(-1));
+        Assert.Null(await context.Store.TryAcquireAsync(request, "recovery", TimeSpan.FromMinutes(2), 3));
+        Assert.Null(await context.Store.TryAcquireAsync(request, "recovery", TimeSpan.FromMinutes(2), 3));
+        var failed = Assert.Single(context.Harness.Published.Select<JobStatusChanged>()).Context.Message;
+        Assert.Equal(JobStatus.Failed, failed.Status);
+        Assert.Equal("RETRY_LIMIT_EXHAUSTED", failed.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Recovery_continues_sequence_and_preserves_original_message_identity()
+    {
+        await using var context = await WorkerTestContext.StartAsync();
+        var request = WorkerTestContext.Request();
+        context.Store.RegisterJob(request, attempt: 1, sequence: 7, status: JobStatus.Running,
+            phase: MigrationPhase.Provisioning, expiresAt: context.Clock.GetUtcNow().AddMinutes(-1), owner: "previous");
+        var recovery = new JobRecoveryService(context.Store, context.Orchestrator(), Options.Create(new WorkerOptions()), NullLogger<JobRecoveryService>.Instance);
+        await recovery.RecoverStaleJobsAsync();
+        var events = context.Harness.Published.Select<JobStatusChanged>().Select(item => item.Context.Message).ToList();
+        Assert.Equal(new long[] { 8, 9, 10, 11, 12 }, events.Select(item => item.Sequence));
+        Assert.All(events, item =>
         {
-            Name = "demo-recovery",
-            ContainerImage = "docker.io/myorg/demo:1.0.0@sha256:12345678",
-            Environment = "production",
-            Provider = "selectel",
-            ContainerPort = 8080,
-            TargetConfigurationId = Guid.NewGuid(),
-            TerraformModule = "container-vm-selectel:v1.0.0",
-            EntrypointDomain = "demo.example.com",
-            HealthCheck = new HealthCheckPolicy
-            {
-                Path = "/healthz",
-                IntervalSeconds = 2,
-                TimeoutSeconds = 5,
-                FailureThreshold = 3,
-                RecoveryThreshold = 2
-            }
+            Assert.Equal(2, item.Attempt);
+            Assert.Equal(request.CorrelationId, item.CorrelationId);
+        });
+        Assert.Equal(JobStatus.Succeeded, events.Last().Status);
+    }
+
+    [Fact]
+    public async Task Conflicting_target_state_stops_recovery()
+    {
+        await using var context = await WorkerTestContext.StartAsync();
+        var request = WorkerTestContext.Request();
+        context.Store.RegisterJob(request, attempt: 1, status: JobStatus.Running, expiresAt: context.Clock.GetUtcNow().AddMinutes(-1));
+        var outcome = await context.Orchestrator(executor: new ConflictingExecutor()).ExecuteMigrationAsync(request);
+        Assert.Equal("CONFLICTING_TARGET_STATE", outcome.ErrorCode);
+        Assert.Equal(JobStatus.Failed, outcome.FinalStatus);
+    }
+
+    [Fact]
+    public async Task Interrupted_cutover_requires_reconciliation_instead_of_repeating_the_mutation()
+    {
+        await using var context = await WorkerTestContext.StartAsync();
+        var request = WorkerTestContext.Request();
+        context.Store.RegisterJob(request, attempt: 1, status: JobStatus.Running, cutover: CutoverOutcome.Applied,
+            phase: MigrationPhase.EntrypointVerification, expiresAt: context.Clock.GetUtcNow().AddMinutes(-1));
+        var outcome = await context.Orchestrator(executor: new ConflictingExecutor()).ExecuteMigrationAsync(request);
+        Assert.Equal("UNCERTAIN_CUTOVER_STATE", outcome.ErrorCode);
+        Assert.Equal(MigrationPhase.TrafficCutover, outcome.FinalPhase);
+        Assert.Equal(CutoverOutcome.Uncertain, context.Harness.Published.Select<JobStatusChanged>().Last().Context.Message.Cutover);
+    }
+
+    [Fact]
+    public async Task A_rejected_checkpoint_prevents_traffic_cutover()
+    {
+        await using var context = await WorkerTestContext.StartAsync();
+        var request = WorkerTestContext.Request();
+        context.Store.RegisterJob(request);
+        var routing = new CountingRouting();
+        var outcome = await context.Orchestrator(routing: routing, store: new RejectCutoverStore(context.Store)).ExecuteMigrationAsync(request);
+        Assert.Equal("LEASE_LOST", outcome.ErrorCode);
+        Assert.Equal(0, routing.CutoverCalls);
+    }
+
+    private sealed class ConflictingExecutor : IInfrastructureExecutor
+    {
+        public Task<ProvisioningResult> ProvisionAsync(ProvisioningRequest request, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Provisioning must stop after a conflict.");
+        public Task<ReconciliationResult> ReconcileAsync(ReconciliationRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(ReconciliationResult.Conflict("CONFLICTING_TARGET_STATE", "Conflicting route."));
+    }
+
+    private sealed class CountingRouting : ITrafficRoutingService
+    {
+        public int CutoverCalls { get; private set; }
+        public Task<RoutingResult> CutoverAsync(string domain, string endpoint, string? provider, CancellationToken cancellationToken = default)
+        {
+            CutoverCalls++;
+            return Task.FromResult(RoutingResult.Success($"https://{domain}"));
         }
-    };
-
-    [Fact]
-    public async Task Active_unexpired_lease_cannot_be_acquired_by_another_worker()
-    {
-        var store = new InMemoryJobLeaseStore();
-        var job = CreateRunningJobLease(expiresAt: DateTimeOffset.UtcNow.AddMinutes(5));
-        store.RegisterJob(job);
-
-        var attempt = await store.TryAcquireOrRenewLeaseAsync(job.JobId, "worker-beta", TimeSpan.FromMinutes(2));
-
-        Assert.Null(attempt);
+        public Task<RoutingResult> VerifyEntrypointAsync(string domain, string path, CancellationToken cancellationToken = default)
+            => Task.FromResult(RoutingResult.Success($"https://{domain}"));
     }
 
-    [Fact]
-    public async Task Expired_lease_is_acquired_by_new_worker_with_incremented_attempt()
+    private sealed class RejectCutoverStore(IJobLeaseStore inner) : IJobLeaseStore
     {
-        var store = new InMemoryJobLeaseStore();
-        var job = CreateRunningJobLease(
-            expiresAt: DateTimeOffset.UtcNow.AddMinutes(-1), // expired 1 minute ago
-            attempt: 1);
-        store.RegisterJob(job);
-
-        var acquired = await store.TryAcquireOrRenewLeaseAsync(job.JobId, "worker-beta", TimeSpan.FromMinutes(2));
-
-        Assert.NotNull(acquired);
-        Assert.Equal("worker-beta", acquired.WorkerId);
-        Assert.Equal(2, acquired.Attempt);
-        Assert.True(acquired.LeaseExpiresAt > DateTimeOffset.UtcNow);
-    }
-
-    [Fact]
-    public async Task Fencing_prevents_expired_worker_from_updating_checkpoint()
-    {
-        var store = new InMemoryJobLeaseStore();
-        var job = CreateRunningJobLease(
-            expiresAt: DateTimeOffset.UtcNow.AddMinutes(-1),
-            attempt: 1);
-        store.RegisterJob(job);
-
-        // worker-beta takes over the lease (attempt 2)
-        var acquired = await store.TryAcquireOrRenewLeaseAsync(job.JobId, "worker-beta", TimeSpan.FromMinutes(2));
-        Assert.NotNull(acquired);
-        Assert.Equal(2, acquired.Attempt);
-
-        // Old worker-alpha wakes up and tries to checkpoint with old Attempt 1
-        var updateResult = await store.UpdateCheckpointAsync(
-            job.JobId,
-            expectedAttempt: 1, // Stale attempt!
-            phase: MigrationPhase.TrafficCutover);
-
-        Assert.False(updateResult); // Fenced out!
-    }
-
-    [Fact]
-    public async Task Retry_exhaustion_marks_job_failed_requiring_manual_recovery()
-    {
-        var store = new InMemoryJobLeaseStore();
-        var job = CreateRunningJobLease(
-            expiresAt: DateTimeOffset.UtcNow.AddMinutes(-1),
-            attempt: 3,
-            maxAttempts: 3);
-        store.RegisterJob(job);
-
-        // Next acquire attempts to exceed max attempts 3
-        var acquired = await store.TryAcquireOrRenewLeaseAsync(job.JobId, "worker-beta", TimeSpan.FromMinutes(2));
-
-        Assert.Null(acquired);
-        var stale = await store.FindStaleJobsAsync(DateTimeOffset.UtcNow);
-        // Excluded from running stale jobs because it was marked Failed
-        Assert.DoesNotContain(stale, x => x.JobId == job.JobId);
-    }
-
-    [Fact]
-    public async Task Job_recovery_service_reconciles_and_completes_stale_job()
-    {
-        await using var provider = new ServiceCollection()
-            .AddMassTransitTestHarness()
-            .BuildServiceProvider(true);
-
-        var harness = provider.GetRequiredService<ITestHarness>();
-        await harness.Start();
-
-        var store = new InMemoryJobLeaseStore();
-        var executor = new DeterministicInfrastructureExecutor();
-        var healthValidator = new DeterministicHealthValidator();
-        var routingService = new DeterministicTrafficRoutingService();
-        var orchestrator = new MigrationOrchestrator(executor, healthValidator, routingService, harness.Bus);
-
-        var job = CreateRunningJobLease(expiresAt: DateTimeOffset.UtcNow.AddMinutes(-2));
-        store.RegisterJob(job);
-
-        var recoveryService = new JobRecoveryService(store, executor, orchestrator, harness.Bus);
-        var recoveryResults = await recoveryService.RecoverStaleJobsAsync("recovery-worker-1", TimeSpan.FromMinutes(5));
-
-        var singleResult = Assert.Single(recoveryResults);
-        Assert.Equal(job.JobId, singleResult.JobId);
-        Assert.True(singleResult.Recovered);
-        Assert.NotNull(singleResult.Outcome);
-        Assert.True(singleResult.Outcome.IsSuccess);
-
-        // Check that published events used Attempt = 2
-        var events = harness.Published.Select<JobStatusChanged>().ToList();
-        Assert.All(events, e => Assert.Equal(2, e.Context.Message.Attempt));
-    }
-
-    [Fact]
-    public async Task Conflicting_reconciliation_state_stops_recovery_and_marks_failed()
-    {
-        await using var provider = new ServiceCollection()
-            .AddMassTransitTestHarness()
-            .BuildServiceProvider(true);
-
-        var harness = provider.GetRequiredService<ITestHarness>();
-        await harness.Start();
-
-        var store = new InMemoryJobLeaseStore();
-        // Executor returns conflict on reconciliation:
-        var mockExecutor = new ConflictingInfrastructureExecutor();
-        var healthValidator = new DeterministicHealthValidator();
-        var routingService = new DeterministicTrafficRoutingService();
-        var orchestrator = new MigrationOrchestrator(mockExecutor, healthValidator, routingService, harness.Bus);
-
-        var job = CreateRunningJobLease(expiresAt: DateTimeOffset.UtcNow.AddMinutes(-2));
-        store.RegisterJob(job);
-
-        var recoveryService = new JobRecoveryService(store, mockExecutor, orchestrator, harness.Bus);
-        var recoveryResults = await recoveryService.RecoverStaleJobsAsync("recovery-worker-1", TimeSpan.FromMinutes(5));
-
-        var singleResult = Assert.Single(recoveryResults);
-        Assert.False(singleResult.Recovered);
-        Assert.Equal("CONFLICTING_TARGET_STATE", singleResult.Reason);
-    }
-
-    private sealed class ConflictingInfrastructureExecutor : IInfrastructureExecutor
-    {
-        public Task<ProvisioningResult> ProvisionAsync(ProvisioningRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(ProvisioningResult.Failure("CONFLICT", "Conflict", TimeSpan.Zero));
-
-        public Task<ReconciliationResult> ReconcileAsync(ReconciliationRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(ReconciliationResult.Conflict("CONFLICTING_TARGET_STATE", "Observed conflicting route in DNS"));
+        public Task<JobLease?> TryAcquireAsync(DeploymentRequested request, string owner, TimeSpan duration, int attempts, CancellationToken cancellationToken = default)
+            => inner.TryAcquireAsync(request, owner, duration, attempts, cancellationToken);
+        public Task<bool> RenewAsync(JobLease lease, TimeSpan duration, CancellationToken cancellationToken = default)
+            => inner.RenewAsync(lease, duration, cancellationToken);
+        public Task<IReadOnlyList<DeploymentRequested>> FindStaleJobsAsync(DateTimeOffset asOf, int limit, CancellationToken cancellationToken = default)
+            => inner.FindStaleJobsAsync(asOf, limit, cancellationToken);
+        public Task<JobStatusChanged?> RecordProgressAsync(JobLease lease, JobStatus status, MigrationPhase phase, CutoverOutcome cutover,
+            Uri? endpoint = null, string? errorCode = null, string? errorMessage = null, string? stateFingerprint = null, CancellationToken cancellationToken = default)
+            => phase == MigrationPhase.TrafficCutover ? Task.FromResult<JobStatusChanged?>(null)
+                : inner.RecordProgressAsync(lease, status, phase, cutover, endpoint, errorCode, errorMessage, stateFingerprint, cancellationToken);
     }
 }

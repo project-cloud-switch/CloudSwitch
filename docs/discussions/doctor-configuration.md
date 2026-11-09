@@ -1,6 +1,6 @@
 # Discussion: Doctor configuration and replicas
 
-**Status: open.** Replica coordination is not an architecture decision yet.
+**Status: initial discovery selected: load PostgreSQL configuration at startup and poll revisions.** See [API v1 decisions](../decisions/api-v1.md). Event-driven distribution and replica coordination remain deferred. The original alternatives follow for future review.
 
 ## Question
 

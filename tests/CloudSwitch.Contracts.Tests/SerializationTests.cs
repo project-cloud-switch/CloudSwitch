@@ -33,6 +33,30 @@ public class SerializationTests
     }
 
     [Fact]
+    public void Complete_migration_snapshot_round_trips_without_losing_reproducible_inputs()
+    {
+        var request = Read<DeploymentRequested>("deployment-requested.v2.json");
+        Assert.Equal(DeploymentTrigger.Automatic, request.Trigger);
+        Assert.NotNull(request.IncidentId);
+        Assert.Equal(80, request.Specification.ContainerPort);
+        Assert.Equal("local-stateless-v1:local-simulation-v1", request.Specification.TerraformModule);
+        Assert.Equal("vault://demo#api-key", request.Specification.SecretReferences!["API_KEY"]);
+        Assert.Equal(request, JsonSerializer.Deserialize<DeploymentRequested>(JsonSerializer.Serialize(request, JsonOptions), JsonOptions));
+    }
+
+    [Fact]
+    public void Progress_can_report_phase_endpoint_and_uncertain_cutover()
+    {
+        var status = Read<JobStatusChanged>("job-status-changed.v1.json") with
+        {
+            Status = JobStatus.Failed, Phase = MigrationPhase.EntrypointVerification,
+            TargetEndpoint = "https://target.example.test", Cutover = CutoverOutcome.Uncertain,
+            ErrorCode = "entrypoint_unverified", ErrorMessage = "Traffic verification did not complete."
+        };
+        Assert.Equal(status, JsonSerializer.Deserialize<JobStatusChanged>(JsonSerializer.Serialize(status, JsonOptions), JsonOptions));
+    }
+
+    [Fact]
     public void Status_event_preserves_ordering_and_optional_failure_details()
     {
         var status = Read<JobStatusChanged>("job-status-changed.v1.json");

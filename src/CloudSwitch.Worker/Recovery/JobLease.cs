@@ -1,26 +1,12 @@
 using CloudSwitch.Contracts;
+using CloudSwitch.Contracts.Events;
 
 namespace CloudSwitch.Worker.Recovery;
 
-/// <summary>
-/// Represents a fenced lease and execution checkpoint for a migration job.
-/// </summary>
-public sealed record JobLease
+public sealed record JobLease(DeploymentRequested Request, string WorkerId, int Attempt,
+    long FencingToken, DateTimeOffset LeaseExpiresAt, JobStatus PreviousStatus, long Sequence,
+    MigrationPhase Phase, Uri? TargetEndpoint, CutoverOutcome Cutover, string? StateFingerprint = null)
 {
-    public required Guid JobId { get; init; }
-    public required Guid DeploymentId { get; init; }
-    public required Guid UserId { get; init; }
-    public required string WorkerId { get; init; }
-    public required int Attempt { get; init; }
-    public required DateTimeOffset LeaseExpiresAt { get; init; }
-    public required JobStatus Status { get; init; }
-    public required MigrationPhase CurrentPhase { get; init; }
-    public string? TargetEndpoint { get; init; }
-    public required DeploymentSpecification Specification { get; init; }
-    public int MaxAttempts { get; init; } = 3;
-    public string? ErrorCode { get; init; }
-    public string? ErrorMessage { get; init; }
-
-    public bool IsExpired(DateTimeOffset now) => now >= LeaseExpiresAt;
-    public bool HasExhaustedRetries => Attempt >= MaxAttempts;
+    public Guid JobId => Request.JobId;
+    public Guid DeploymentId => Request.DeploymentId;
 }

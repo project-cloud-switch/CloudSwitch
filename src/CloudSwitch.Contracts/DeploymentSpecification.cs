@@ -71,6 +71,7 @@ public sealed record DeploymentSpecification
         hash.Add(Environment);
         hash.Add(Provider);
         hash.Add(ContainerPort);
+        hash.Add(ImagePullSecretReference);
         hash.Add(CpuCores);
         hash.Add(MemoryMb);
         hash.Add(TargetConfigurationId);
@@ -104,12 +105,7 @@ public sealed record DeploymentSpecification
         if (aCount == 0 && bCount == 0) return true;
         if (a is null || b is null || a.Count != b.Count) return false;
 
-        foreach (var (key, value) in a)
-        {
-            if (!b.TryGetValue(key, out var bVal) || !string.Equals(bVal, value, StringComparison.Ordinal))
-                return false;
-        }
-
-        return true;
+        return a.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .SequenceEqual(b.OrderBy(pair => pair.Key, StringComparer.Ordinal));
     }
 }
