@@ -25,6 +25,7 @@ public sealed class MessagingFactAttribute : FactAttribute
 }
 
 [Collection("PostgreSQL")]
+[Trait("Category", "ExternalIntegration")]
 public sealed class WorkerMessagingTests
 {
     [MessagingFact]

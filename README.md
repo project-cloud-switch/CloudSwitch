@@ -56,6 +56,8 @@ dotnet test CloudSwitch.sln --no-build
 
 Default tests use locally signed tokens and in-memory messaging. Optional PostgreSQL tests use `CLOUDSWITCH_TEST_POSTGRES` and an isolated database; see [verification](docs/api.md#verification-and-remaining-services). No cloud credentials are needed.
 
+[CI checks and exact local commands](docs/ci.md) cover the separate unit/contracts and PostgreSQL/RabbitMQ jobs, including migration consistency and detection of skipped integration tests.
+
 ## Development documentation
 
 - [Service contracts](docs/contracts.md)

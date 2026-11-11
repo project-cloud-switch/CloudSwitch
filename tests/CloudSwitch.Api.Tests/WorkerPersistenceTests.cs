@@ -20,6 +20,7 @@ using Domain = CloudSwitch.Persistence.Domain;
 namespace CloudSwitch.Api.Tests;
 
 [Collection("PostgreSQL")]
+[Trait("Category", "ExternalIntegration")]
 public sealed class WorkerPersistenceTests(DatabaseFixture fixture)
 {
     private HttpClient Client()

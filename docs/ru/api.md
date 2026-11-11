@@ -149,6 +149,8 @@ dotnet ef migrations add <Name> --project src/CloudSwitch.Persistence --startup-
 
 ## Проверка и оставшиеся сервисы
 
+Точные команды Release-сборки, фильтры unit/integration, проверка модели EF и проверка результатов интеграционных тестов для pull request и `main` описаны в [документации CI](../ci.md).
+
 ```sh
 dotnet test CloudSwitch.sln
 ```

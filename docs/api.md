@@ -149,6 +149,8 @@ The design-time factory reads `ConnectionStrings__Postgres` or uses the local co
 
 ## Verification and remaining services
 
+See [CI checks and local reproduction](ci.md) for the exact Release build, unit/integration filters, EF model check and integration result guard used on pull requests and `main`.
+
 ```sh
 dotnet test CloudSwitch.sln
 ```

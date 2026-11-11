@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  unit:
+    name: Unit and contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read pinned SDK version
+        id: sdk
+        run: |
+          echo "version=$(jq -r '.sdk.version' global.json)" >> "$GITHUB_OUTPUT"
+          echo "DOTNET_INSTALL_DIR=$RUNNER_TEMP/dotnet" >> "$GITHUB_ENV"
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: ${{ steps.sdk.outputs.version }}
+          skip-lts-prepass: true
+      - name: Verify pinned SDK
+        env:
+          EXPECTED_SDK: ${{ steps.sdk.outputs.version }}
+        run: test "$(dotnet --version)" = "$EXPECTED_SDK"
+      - run: dotnet restore CloudSwitch.sln
+      - run: dotnet build CloudSwitch.sln --configuration Release --no-restore
+      - name: Test unit and contracts
+        run: >-
+          dotnet test CloudSwitch.sln --configuration Release --no-build
+          --filter 'Category!=ExternalIntegration'
+          --logger trx --results-directory TestResults/unit
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unit-results
+          path: TestResults/unit
+          retention-days: 7
+
+  integration:
+    name: PostgreSQL and RabbitMQ
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: cloudswitch
+          POSTGRES_USER: cloudswitch
+          POSTGRES_PASSWORD: cloudswitch-dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cloudswitch -d cloudswitch"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      rabbitmq:
+        image: rabbitmq:4-management-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: cloudswitch
+          RABBITMQ_DEFAULT_PASS: cloudswitch-dev
+        ports:
+          - 5672:5672
+          - 15672:15672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      CLOUDSWITCH_TEST_POSTGRES: Host=localhost;Port=5432;Database=cloudswitch;Username=cloudswitch;Password=cloudswitch-dev
+      CLOUDSWITCH_TEST_RABBITMQ: amqp://cloudswitch:cloudswitch-dev@localhost:5672
+      CLOUDSWITCH_TEST_RABBITMQ_MANAGEMENT: http://localhost:15672
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read pinned SDK version
+        id: sdk
+        run: |
+          echo "version=$(jq -r '.sdk.version' global.json)" >> "$GITHUB_OUTPUT"
+          echo "DOTNET_INSTALL_DIR=$RUNNER_TEMP/dotnet" >> "$GITHUB_ENV"
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: ${{ steps.sdk.outputs.version }}
+          skip-lts-prepass: true
+      - name: Verify pinned SDK
+        env:
+          EXPECTED_SDK: ${{ steps.sdk.outputs.version }}
+        run: test "$(dotnet --version)" = "$EXPECTED_SDK"
+      - run: dotnet restore CloudSwitch.sln
+      - run: dotnet tool restore
+      - run: dotnet build CloudSwitch.sln --configuration Release --no-restore
+      - name: Check EF model matches migrations
+        run: >-
+          dotnet ef migrations has-pending-model-changes
+          --project src/CloudSwitch.Persistence --startup-project src/CloudSwitch.Persistence
+          --configuration Release --no-build
+      - name: Test integration result guard
+        run: python3 -m unittest discover -s scripts/tests
+      - name: Wait for RabbitMQ management API
+        run: >-
+          curl --fail --silent --show-error --retry 15 --retry-all-errors
+          --retry-delay 2 --max-time 5 --user cloudswitch:cloudswitch-dev
+          "$CLOUDSWITCH_TEST_RABBITMQ_MANAGEMENT/api/overview" --output /dev/null
+      - name: Test PostgreSQL and RabbitMQ
+        id: tests
+        run: >-
+          dotnet test tests/CloudSwitch.Api.Tests --configuration Release --no-build
+          --filter 'Category=ExternalIntegration'
+          --logger 'trx;LogFileName=integration.trx' --results-directory TestResults/integration
+          --blame-hang-timeout 3m
+      - name: Require integration tests to pass without skips
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
+        run: python3 scripts/verify_integration_results.py TestResults/integration/integration.trx
+      - name: Collect service logs on failure
+        if: failure()
+        run: |
+          mkdir -p TestResults/integration
+          docker logs '${{ job.services.postgres.id }}' > TestResults/integration/postgres.log 2>&1
+          docker logs '${{ job.services.rabbitmq.id }}' > TestResults/integration/rabbitmq.log 2>&1
+      - name: Upload test results and service logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: integration-results
+          path: TestResults/integration
+          retention-days: 7
