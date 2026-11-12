@@ -22,7 +22,7 @@ namespace CloudSwitch.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("CloudSwitch.Persistence.Deployment", b =>
+            modelBuilder.Entity("CloudSwitch.Persistence.Domain.Deployment", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -43,6 +43,9 @@ namespace CloudSwitch.Persistence.Migrations
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)");
 
+                    b.Property<long>("ObservationRevision")
+                        .HasColumnType("bigint");
+
                     b.Property<long>("Revision")
                         .IsConcurrencyToken()
                         .HasColumnType("bigint");
@@ -60,7 +63,7 @@ namespace CloudSwitch.Persistence.Migrations
                     b.ToTable("Deployments");
                 });
 
-            modelBuilder.Entity("CloudSwitch.Persistence.DeploymentRuntime", b =>
+            modelBuilder.Entity("CloudSwitch.Persistence.Domain.DeploymentRuntime", b =>
                 {
                     b.Property<Guid>("DeploymentId")
                         .HasColumnType("uuid");
@@ -84,7 +87,7 @@ namespace CloudSwitch.Persistence.Migrations
                     b.ToTable("Runtimes");
                 });
 
-            modelBuilder.Entity("CloudSwitch.Persistence.HealthObservation", b =>
+            modelBuilder.Entity("CloudSwitch.Persistence.Domain.HealthObservation", b =>
                 {
                     b.Property<Guid>("DeploymentId")
                         .HasColumnType("uuid");
@@ -127,7 +130,7 @@ namespace CloudSwitch.Persistence.Migrations
                         });
                 });
 
-            modelBuilder.Entity("CloudSwitch.Persistence.Incident", b =>
+            modelBuilder.Entity("CloudSwitch.Persistence.Domain.Incident", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -151,7 +154,7 @@ namespace CloudSwitch.Persistence.Migrations
                     b.ToTable("Incidents");
                 });
 
-            modelBuilder.Entity("CloudSwitch.Persistence.Job", b =>
+            modelBuilder.Entity("CloudSwitch.Persistence.Domain.Job", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -266,7 +269,7 @@ namespace CloudSwitch.Persistence.Migrations
                         });
                 });
 
-            modelBuilder.Entity("CloudSwitch.Persistence.JobEvent", b =>
+            modelBuilder.Entity("CloudSwitch.Persistence.Domain.JobEvent", b =>
                 {
                     b.Property<Guid>("EventId")
                         .ValueGeneratedOnAdd()
@@ -293,7 +296,7 @@ namespace CloudSwitch.Persistence.Migrations
                         });
                 });
 
-            modelBuilder.Entity("CloudSwitch.Persistence.TargetConfiguration", b =>
+            modelBuilder.Entity("CloudSwitch.Persistence.Domain.TargetConfiguration", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -326,7 +329,7 @@ namespace CloudSwitch.Persistence.Migrations
                     b.ToTable("Targets");
                 });
 
-            modelBuilder.Entity("CloudSwitch.Persistence.User", b =>
+            modelBuilder.Entity("CloudSwitch.Persistence.Domain.User", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -525,68 +528,68 @@ namespace CloudSwitch.Persistence.Migrations
                     b.ToTable("OutboxState");
                 });
 
-            modelBuilder.Entity("CloudSwitch.Persistence.Deployment", b =>
+            modelBuilder.Entity("CloudSwitch.Persistence.Domain.Deployment", b =>
                 {
-                    b.HasOne("CloudSwitch.Persistence.User", null)
+                    b.HasOne("CloudSwitch.Persistence.Domain.User", null)
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("CloudSwitch.Persistence.DeploymentRuntime", b =>
+            modelBuilder.Entity("CloudSwitch.Persistence.Domain.DeploymentRuntime", b =>
                 {
-                    b.HasOne("CloudSwitch.Persistence.Deployment", null)
+                    b.HasOne("CloudSwitch.Persistence.Domain.Deployment", null)
                         .WithOne()
-                        .HasForeignKey("CloudSwitch.Persistence.DeploymentRuntime", "DeploymentId")
+                        .HasForeignKey("CloudSwitch.Persistence.Domain.DeploymentRuntime", "DeploymentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("CloudSwitch.Persistence.HealthObservation", b =>
+            modelBuilder.Entity("CloudSwitch.Persistence.Domain.HealthObservation", b =>
                 {
-                    b.HasOne("CloudSwitch.Persistence.Deployment", null)
+                    b.HasOne("CloudSwitch.Persistence.Domain.Deployment", null)
                         .WithOne()
-                        .HasForeignKey("CloudSwitch.Persistence.HealthObservation", "DeploymentId")
+                        .HasForeignKey("CloudSwitch.Persistence.Domain.HealthObservation", "DeploymentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("CloudSwitch.Persistence.Incident", null)
+                    b.HasOne("CloudSwitch.Persistence.Domain.Incident", null)
                         .WithMany()
                         .HasForeignKey("IncidentId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
-            modelBuilder.Entity("CloudSwitch.Persistence.Incident", b =>
+            modelBuilder.Entity("CloudSwitch.Persistence.Domain.Incident", b =>
                 {
-                    b.HasOne("CloudSwitch.Persistence.Deployment", null)
+                    b.HasOne("CloudSwitch.Persistence.Domain.Deployment", null)
                         .WithMany()
                         .HasForeignKey("DeploymentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("CloudSwitch.Persistence.Job", b =>
+            modelBuilder.Entity("CloudSwitch.Persistence.Domain.Job", b =>
                 {
-                    b.HasOne("CloudSwitch.Persistence.Incident", null)
+                    b.HasOne("CloudSwitch.Persistence.Domain.Incident", null)
                         .WithMany()
                         .HasForeignKey("IncidentId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("CloudSwitch.Persistence.User", null)
+                    b.HasOne("CloudSwitch.Persistence.Domain.User", null)
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("CloudSwitch.Persistence.Deployment", null)
+                    b.HasOne("CloudSwitch.Persistence.Domain.Deployment", null)
                         .WithMany()
                         .HasForeignKey("DeploymentId", "UserId")
                         .HasPrincipalKey("Id", "UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("CloudSwitch.Persistence.TargetConfiguration", null)
+                    b.HasOne("CloudSwitch.Persistence.Domain.TargetConfiguration", null)
                         .WithMany()
                         .HasForeignKey("TargetConfigurationId", "DeploymentId")
                         .HasPrincipalKey("Id", "DeploymentId")
@@ -594,18 +597,18 @@ namespace CloudSwitch.Persistence.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("CloudSwitch.Persistence.JobEvent", b =>
+            modelBuilder.Entity("CloudSwitch.Persistence.Domain.JobEvent", b =>
                 {
-                    b.HasOne("CloudSwitch.Persistence.Job", null)
+                    b.HasOne("CloudSwitch.Persistence.Domain.Job", null)
                         .WithMany()
                         .HasForeignKey("JobId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("CloudSwitch.Persistence.TargetConfiguration", b =>
+            modelBuilder.Entity("CloudSwitch.Persistence.Domain.TargetConfiguration", b =>
                 {
-                    b.HasOne("CloudSwitch.Persistence.Deployment", null)
+                    b.HasOne("CloudSwitch.Persistence.Domain.Deployment", null)
                         .WithMany()
                         .HasForeignKey("DeploymentId")
                         .OnDelete(DeleteBehavior.Restrict)
