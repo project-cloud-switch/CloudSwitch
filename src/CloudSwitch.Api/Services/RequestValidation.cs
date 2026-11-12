@@ -42,20 +42,9 @@ internal static partial class RequestValidation
             if (app.Settings is not null && app.SecretReferences is not null)
                 Check(!app.Settings.Keys.Intersect(app.SecretReferences.Keys).Any(), "definition.application", "A setting cannot also be a secret reference.");
         }
-        if (definition.HealthCheck is not { } health)
-            errors["definition.healthCheck"] = ["A health check policy is required."];
-        else
-        {
-            Check(health.Path is { Length: > 0 and <= 512 } && health.Path.StartsWith('/') && !health.Path.StartsWith("//")
-                && !health.Path.Contains('\\') && !health.Path.Contains('#') && !health.Path.Contains('?'), "definition.healthCheck.path", "Use an absolute application path without query, fragment or authority.");
-            Check(health.IntervalSeconds is >= 1 and <= 3600 && health.TimeoutSeconds is >= 1 and <= 60
-                && health.TimeoutSeconds <= health.IntervalSeconds, "definition.healthCheck", "Use interval 1–3600 seconds and timeout 1–60 seconds, no greater than the interval.");
-            Check(health.FailureThreshold is >= 1 and <= 100 && health.RecoveryThreshold is >= 1 and <= 100,
-                "definition.healthCheck.thresholds", "Probe thresholds must be between 1 and 100.");
-        }
-        Check(definition.Recovery is not null && Enum.IsDefined(definition.Recovery.Mode)
-            && (definition.Recovery.Mode != RecoveryMode.Automatic || definition.Recovery.TargetConfigurationId is { } id && id != Guid.Empty),
-            "definition.recovery", "Automatic recovery requires an approved target; NotifyOnly is the default.");
+
+        ValidateHealthCheck(definition.HealthCheck, "definition.healthCheck", errors);
+        ValidateRecovery(definition.Recovery, "definition.recovery", errors);
         if (definition.Traffic is not { } traffic)
             errors["definition.traffic"] = ["Traffic configuration is required."];
         else
@@ -81,6 +70,41 @@ internal static partial class RequestValidation
         if (!ValidSecrets(input.SecretReferences))
             errors["secretReferences"] = ["Use named vault://path#key references, never credential values."];
         return errors;
+    }
+
+    public static Dictionary<string, string[]> Monitoring(MonitoringUpdateRequest input)
+    {
+        var errors = new Dictionary<string, string[]>();
+        ValidateHealthCheck(input.HealthCheck, "healthCheck", errors);
+        ValidateRecovery(input.Recovery, "recovery", errors);
+        return errors;
+    }
+
+    private static void ValidateHealthCheck(HealthCheckPolicy? health, string field, Dictionary<string, string[]> errors)
+    {
+        if (health is null)
+        {
+            errors[field] = ["A health check policy is required."];
+            return;
+        }
+        Check(health.Path is { Length: > 0 and <= 512 } && health.Path.StartsWith('/') && !health.Path.StartsWith("//")
+            && !health.Path.Contains('\\') && !health.Path.Contains('#') && !health.Path.Contains('?'),
+            $"{field}.path", "Use an absolute application path without query, fragment or authority.");
+        Check(health.IntervalSeconds is >= 1 and <= 3600 && health.TimeoutSeconds is >= 1 and <= 60
+            && health.TimeoutSeconds <= health.IntervalSeconds,
+            field, "Use interval 1–3600 seconds and timeout 1–60 seconds, no greater than the interval.");
+        Check(health.FailureThreshold is >= 1 and <= 100 && health.RecoveryThreshold is >= 1 and <= 100,
+            $"{field}.thresholds", "Probe thresholds must be between 1 and 100.");
+        void Check(bool valid, string key, string message) { if (!valid) errors[key] = [message]; }
+    }
+
+    private static void ValidateRecovery(RecoveryPolicy? recovery, string field, Dictionary<string, string[]> errors)
+    {
+        var valid = recovery is not null && Enum.IsDefined(recovery.Mode)
+            && (recovery.Mode != RecoveryMode.Automatic
+                || recovery.TargetConfigurationId is { } id && id != Guid.Empty);
+        if (!valid)
+            errors[field] = ["Automatic recovery requires an approved target; NotifyOnly is the default."];
     }
 
     private static bool AllowedEndpoint(Uri? endpoint, EndpointOptions options) => endpoint is { IsAbsoluteUri: true, Scheme: "http" or "https" }

@@ -88,4 +88,22 @@ public sealed class DeploymentService(
             currentObservation?.IncidentId,
             currentObservation?.ObservedAt);
     }
+
+    public async Task<Deployment> UpdateMonitoringAsync(
+        Guid id, MonitoringUpdateRequest request, long? expectedRevision, CancellationToken cancellationToken)
+    {
+        RequestValidation.ThrowIfInvalid(RequestValidation.Monitoring(request));
+        var account = await accounts.GetAsync(cancellationToken);
+        await using var transaction = await unitOfWork.BeginDeploymentTransactionAsync(id, cancellationToken);
+        var deployment = await ResourceAccess.DeploymentAsync(deployments, id, account.Id, cancellationToken);
+        ResourceAccess.MatchRevision(expectedRevision, deployment.Revision);
+        var healthCheck = request.HealthCheck.ToDomain();
+        var recovery = request.Recovery.ToDomain();
+        var candidate = deployment.Definition.WithMonitoring(healthCheck, recovery, request.MonitoringEnabled);
+        await ResourceAccess.ValidateRecoveryAsync(targets, id, candidate, modules, cancellationToken);
+        deployment.UpdateMonitoring(healthCheck, recovery, request.MonitoringEnabled, DateTimeOffset.UtcNow);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return deployment;
+    }
 }

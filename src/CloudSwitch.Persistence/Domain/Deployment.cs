@@ -29,6 +29,11 @@ public sealed record DeploymentDefinition
         Recovery = recovery ?? new RecoveryPolicy();
         MonitoringEnabled = monitoringEnabled;
     }
+
+    public DeploymentDefinition WithMonitoring(
+        HealthCheckPolicy healthCheck, RecoveryPolicy recovery, bool monitoringEnabled)
+        => new(Environment, SourceProvider, SourceEndpoint, Application,
+            healthCheck, Traffic, recovery, monitoringEnabled);
 }
 
 public sealed class Deployment
@@ -69,6 +74,20 @@ public sealed class Deployment
         var revision = checked(Revision + 1);
         Name = validatedName;
         Definition = definition;
+        Revision = revision;
+        UpdatedAt = now;
+    }
+
+    public void UpdateMonitoring(
+        HealthCheckPolicy healthCheck, 
+        RecoveryPolicy recovery, bool monitoringEnabled, DateTimeOffset now)
+    {
+        DomainGuard.Require(!IsDeleted, "A deleted deployment cannot be changed.");
+        ArgumentNullException.ThrowIfNull(healthCheck);
+        ArgumentNullException.ThrowIfNull(recovery);
+        var next = Definition.WithMonitoring(healthCheck, recovery, monitoringEnabled);
+        var revision = checked(Revision + 1);
+        Definition = next;
         Revision = revision;
         UpdatedAt = now;
     }
