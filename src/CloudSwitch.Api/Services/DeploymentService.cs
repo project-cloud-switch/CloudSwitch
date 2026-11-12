@@ -76,8 +76,9 @@ public sealed class DeploymentService(
         var deployment = await GetAsync(id, cancellationToken);
         var health = await deployments.FindHealthAsync(id, cancellationToken);
         var runtime = await deployments.FindRuntimeAsync(id, cancellationToken);
-        var currentObservation = health is { } observation && observation.ConfigurationRevision == deployment.Revision
-            && observation.RuntimeRevision == (runtime?.Revision ?? 0) ? observation : null;
+        var currentObservation = health is { } observation
+                && observation.ConfigurationRevision == deployment.ObservationRevision
+                && observation.RuntimeRevision == (runtime?.Revision ?? 0) ? observation : null;
         return new DeploymentHealthResponse(
             id,
             runtime?.Provider ?? deployment.Definition.SourceProvider,
