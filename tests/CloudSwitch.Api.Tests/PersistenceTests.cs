@@ -323,12 +323,16 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
         // NotifyOnly does not create a job even with a confirmed failure.
         await Assert.ThrowsAsync<OperationRejectedException>(() => SubmitAutomaticAsync(command));
         client.DefaultRequestHeaders.IfMatch.Add(new EntityTagHeaderValue("\"1\""));
-        var updated = Definition();
+                var updated = Definition();
         updated = updated with { Definition = updated.Definition with
-        { Recovery = new RecoveryPolicy { Mode = RecoveryMode.Automatic, TargetConfigurationId = target.Id } } };
+        {
+            Recovery = new RecoveryPolicy { Mode = RecoveryMode.Automatic, TargetConfigurationId = target.Id },
+            HealthCheck = updated.Definition.HealthCheck with { Path = "/ready" }
+        } };
         using var policy = await client.PutAsJsonAsync($"/api/v1/deployments/{deployment.Id}", updated);
         Assert.Equal(HttpStatusCode.OK, policy.StatusCode);
-        // The observation is now stale because the configuration revision changed.
+        // The probe path changed, so the observation is stale until Doctor records a new one
+        // with the new observation revision. A policy-only change would keep it current.
         await Assert.ThrowsAsync<OperationRejectedException>(() => SubmitAutomaticAsync(command));
         await using (var db = fixture.CreateDb())
             await db.Health.Where(x => x.DeploymentId == deployment.Id)
