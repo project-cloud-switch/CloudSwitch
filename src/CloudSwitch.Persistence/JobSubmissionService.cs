@@ -81,7 +81,7 @@ public sealed class JobSubmissionService(
             if (!deployment.Definition.MonitoringEnabled || deployment.Definition.Recovery.Mode != RecoveryMode.Automatic
                 || deployment.Definition.Recovery.TargetConfigurationId != target.Id || incident is null || incident.ResolvedAt is not null
                 || health is null || health.Status != DeploymentHealthStatus.Unhealthy || health.IncidentId != command.IncidentId
-                || health.Sequence != command.HealthSequence || health.ConfigurationRevision != deployment.Revision
+                || health.Sequence != command.HealthSequence || health.ConfigurationRevision != deployment.ObservationRevision
                 || health.RuntimeRevision != source.RuntimeRevision)
                 throw Reject(RejectionKind.Conflict, "stale_recovery", "The recovery policy or current health no longer permits this automatic job.");
         }

@@ -29,6 +29,20 @@ public sealed record DeploymentDefinition
         Recovery = recovery ?? new RecoveryPolicy();
         MonitoringEnabled = monitoringEnabled;
     }
+
+    public bool AffectsObservations(DeploymentDefinition next)
+    {
+        ArgumentNullException.ThrowIfNull(next);
+        return SourceProvider != next.SourceProvider
+            || !string.Equals(SourceEndpoint.AbsoluteUri, next.SourceEndpoint.AbsoluteUri, StringComparison.Ordinal)
+            || HealthCheck.Path != next.HealthCheck.Path
+            || HealthCheck.TimeoutSeconds != next.HealthCheck.TimeoutSeconds;
+    }
+
+    public DeploymentDefinition WithMonitoring(
+        HealthCheckPolicy healthCheck, RecoveryPolicy recovery, bool monitoringEnabled)
+        => new(Environment, SourceProvider, SourceEndpoint, Application,
+            healthCheck, Traffic, recovery, monitoringEnabled);
 }
 
 public sealed class Deployment
@@ -42,6 +56,7 @@ public sealed class Deployment
     public bool IsDeleted { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
+    public long ObservationRevision { get; private set; }
 
     private Deployment(string name, DeploymentDefinition definition)
     {
@@ -57,9 +72,12 @@ public sealed class Deployment
         ArgumentNullException.ThrowIfNull(definition);
         return new Deployment(DomainGuard.Text(name, nameof(Name), 120).Trim(), definition)
         {
-            Id = Guid.NewGuid(), UserId = userId, Revision = 1, CreatedAt = now, UpdatedAt = now
+            Id = Guid.NewGuid(), UserId = userId, Revision = 1, ObservationRevision = 1, CreatedAt = now, UpdatedAt = now
         };
     }
+
+    private long NextObservationRevision(DeploymentDefinition next)
+        => Definition.AffectsObservations(next) ? checked(ObservationRevision + 1) : ObservationRevision;
 
     public void UpdateConfiguration(string name, DeploymentDefinition definition, DateTimeOffset now)
     {
@@ -67,9 +85,26 @@ public sealed class Deployment
         var validatedName = DomainGuard.Text(name, nameof(Name), 120).Trim();
         ArgumentNullException.ThrowIfNull(definition);
         var revision = checked(Revision + 1);
+        var observationRevision = NextObservationRevision(definition);
         Name = validatedName;
         Definition = definition;
         Revision = revision;
+        ObservationRevision = observationRevision;
+        UpdatedAt = now;
+    }
+
+    public void UpdateMonitoring(
+        HealthCheckPolicy healthCheck, RecoveryPolicy recovery, bool monitoringEnabled, DateTimeOffset now)
+    {
+        DomainGuard.Require(!IsDeleted, "A deleted deployment cannot be changed.");
+        ArgumentNullException.ThrowIfNull(healthCheck);
+        ArgumentNullException.ThrowIfNull(recovery);
+        var next = Definition.WithMonitoring(healthCheck, recovery, monitoringEnabled);
+        var revision = checked(Revision + 1);
+        var observationRevision = NextObservationRevision(next);
+        Definition = next;
+        Revision = revision;
+        ObservationRevision = observationRevision;
         UpdatedAt = now;
     }
 

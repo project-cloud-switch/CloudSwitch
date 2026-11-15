@@ -1,4 +1,5 @@
 using CloudSwitch.Contracts;
+using System.Text.Json.Serialization;
 
 namespace CloudSwitch.Api.Contracts;
 
@@ -29,3 +30,11 @@ public sealed record TargetRequest
 }
 
 public sealed record JobRequest(Guid TargetConfigurationId);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record MonitoringUpdateRequest
+{
+    public required HealthCheckPolicy HealthCheck { get; init; }
+    public required RecoveryPolicy Recovery { get; init; }
+    public required bool MonitoringEnabled { get; init; }
+}

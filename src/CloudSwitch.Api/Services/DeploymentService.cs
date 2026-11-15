@@ -76,8 +76,9 @@ public sealed class DeploymentService(
         var deployment = await GetAsync(id, cancellationToken);
         var health = await deployments.FindHealthAsync(id, cancellationToken);
         var runtime = await deployments.FindRuntimeAsync(id, cancellationToken);
-        var currentObservation = health is { } observation && observation.ConfigurationRevision == deployment.Revision
-            && observation.RuntimeRevision == (runtime?.Revision ?? 0) ? observation : null;
+        var currentObservation = health is { } observation
+                && observation.ConfigurationRevision == deployment.ObservationRevision
+                && observation.RuntimeRevision == (runtime?.Revision ?? 0) ? observation : null;
         return new DeploymentHealthResponse(
             id,
             runtime?.Provider ?? deployment.Definition.SourceProvider,
@@ -87,5 +88,23 @@ public sealed class DeploymentService(
             health?.Sequence ?? 0,
             currentObservation?.IncidentId,
             currentObservation?.ObservedAt);
+    }
+
+    public async Task<Deployment> UpdateMonitoringAsync(
+        Guid id, MonitoringUpdateRequest request, long? expectedRevision, CancellationToken cancellationToken)
+    {
+        RequestValidation.ThrowIfInvalid(RequestValidation.Monitoring(request));
+        var account = await accounts.GetAsync(cancellationToken);
+        await using var transaction = await unitOfWork.BeginDeploymentTransactionAsync(id, cancellationToken);
+        var deployment = await ResourceAccess.DeploymentAsync(deployments, id, account.Id, cancellationToken);
+        ResourceAccess.MatchRevision(expectedRevision, deployment.Revision);
+        var healthCheck = request.HealthCheck.ToDomain();
+        var recovery = request.Recovery.ToDomain();
+        var candidate = deployment.Definition.WithMonitoring(healthCheck, recovery, request.MonitoringEnabled);
+        await ResourceAccess.ValidateRecoveryAsync(targets, id, candidate, modules, cancellationToken);
+        deployment.UpdateMonitoring(healthCheck, recovery, request.MonitoringEnabled, DateTimeOffset.UtcNow);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return deployment;
     }
 }

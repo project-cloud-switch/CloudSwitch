@@ -52,6 +52,21 @@ public sealed class DeploymentsController(DeploymentService service) : Controlle
         return Ok(DeploymentResponse.From(deployment));
     }
 
+    [HttpPut("{id:guid}/monitoring", Name = "UpdateDeploymentMonitoring")]
+    [ProducesResponseType<DeploymentResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<HttpValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status412PreconditionFailed)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status428PreconditionRequired)]
+    public async Task<IActionResult> UpdateMonitoring(
+        Guid id, MonitoringUpdateRequest request, CancellationToken cancellationToken)
+    {
+        var deployment = await service.UpdateMonitoringAsync(
+            id, request, ResourceHeaders.ExpectedRevision(Request), cancellationToken);
+        ResourceHeaders.ETag(Response, deployment.Revision);
+        return Ok(DeploymentResponse.From(deployment));
+    }
+
     [HttpDelete("{id:guid}", Name = "DeleteDeployment")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
