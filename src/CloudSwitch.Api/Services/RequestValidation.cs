@@ -4,6 +4,7 @@ using CloudSwitch.Contracts;
 using CloudSwitch.Persistence;
 using CloudSwitch.Api.Contracts;
 using CloudSwitch.Api.Infrastructure;
+using Domain = CloudSwitch.Persistence.Domain;
 
 namespace CloudSwitch.Api.Services;
 
@@ -32,7 +33,7 @@ internal static partial class RequestValidation
         else
         {
             Check(!string.IsNullOrWhiteSpace(app.Image) && PinnedImage().IsMatch(app.Image) && !app.Image.EndsWith(":latest", StringComparison.OrdinalIgnoreCase), "definition.application.image", "Use an explicit image tag or a complete SHA-256 digest.");
-            Check(app.ImagePullSecretReference is null || SecretReference().IsMatch(app.ImagePullSecretReference),
+            Check(app.ImagePullSecretReference is null || SecretReference(app.ImagePullSecretReference),
                 "definition.application.imagePullSecretReference", "Use a vault://path#key registry credential reference.");
             Check(app.Port is >= 1 and <= 65535, "definition.application.port", "Port must be between 1 and 65535.");
             Check(app.CpuMillicores is >= 100 and <= 64000, "definition.application.cpuMillicores", "CPU must be between 100 and 64000 millicores.");
@@ -53,7 +54,7 @@ internal static partial class RequestValidation
             Check(traffic.RecordName is { Length: <= 253 } && Uri.CheckHostName(traffic.RecordName) == UriHostNameType.Dns,
                 "definition.traffic.recordName", "A DNS entrypoint name is required.");
             Check(traffic.Driver != "cloudflare-dns" || !string.IsNullOrWhiteSpace(traffic.ZoneReference)
-                && SecretReference().IsMatch(traffic.CredentialReference ?? ""), "definition.traffic", "DNS traffic control requires a zone and vault://path#key credential reference.");
+                && SecretReference(traffic.CredentialReference ?? ""), "definition.traffic", "DNS traffic control requires a zone and vault://path#key credential reference.");
         }
         return errors;
         void Check(bool valid, string field, string message) { if (!valid) errors[field] = [message]; }
@@ -115,12 +116,11 @@ internal static partial class RequestValidation
     private static bool ValidMap([NotNullWhen(true)] Dictionary<string, string>? map, int maxValueLength) => map is not null && map.Count <= 100
         && map.All(pair => Identifier().IsMatch(pair.Key) && pair.Value is not null && pair.Value.Length <= maxValueLength);
     private static bool ValidSecrets(Dictionary<string, string>? map) => ValidMap(map, 512)
-        && map.Values.All(value => SecretReference().IsMatch(value));
+        && map.Values.All(value => SecretReference(value));
 
     [GeneratedRegex(@"\A[a-zA-Z_][a-zA-Z0-9_.-]{0,63}\z")]
     private static partial Regex Identifier();
     [GeneratedRegex(@"\A[a-zA-Z0-9][a-zA-Z0-9._:/-]*(?:@sha256:[a-fA-F0-9]{64}|:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})\z")]
     private static partial Regex PinnedImage();
-    [GeneratedRegex(@"\Avault://[a-zA-Z0-9][a-zA-Z0-9_./-]{0,450}#[a-zA-Z0-9_.-]{1,64}\z")]
-    private static partial Regex SecretReference();
+    private static bool SecretReference(string? value) => Domain.VaultReference.TryParse(value, out _);
 }
