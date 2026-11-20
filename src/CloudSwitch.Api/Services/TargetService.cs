@@ -4,6 +4,7 @@ using CloudSwitch.Api.Infrastructure;
 using CloudSwitch.Persistence;
 using CloudSwitch.Persistence.Domain;
 using CloudSwitch.Persistence.Repositories;
+using Microsoft.Extensions.Options;
 
 namespace CloudSwitch.Api.Services;
 
@@ -13,7 +14,8 @@ public sealed class TargetService(
     TargetRepository targets,
     JobRepository jobs,
     UnitOfWork unitOfWork,
-    ApprovedModules modules)
+    ApprovedModules modules,
+    IOptions<AccessOptions> access)
 {
     public IReadOnlyList<ApprovedModule> ListModules()
         => modules.All;
@@ -26,6 +28,9 @@ public sealed class TargetService(
         await using var transaction = await unitOfWork.BeginDeploymentTransactionAsync(deploymentId, cancellationToken);
         await ResourceAccess.DeploymentAsync(deployments, deploymentId, account.Id, cancellationToken);
         await ResourceAccess.RequireIdleAsync(jobs, deploymentId, cancellationToken);
+        ResourceAccess.RequireReferences(account.Id,
+            request.SecretReferences.Select(pair => ($"secretReferences.{pair.Key}", pair.Value)),
+            null, access.Value);
         var now = DateTimeOffset.UtcNow;
         var target = TargetConfiguration.Create(deploymentId, Definition(request), now);
         targets.Add(target);
@@ -60,6 +65,9 @@ public sealed class TargetService(
         var target = await FindAsync(deploymentId, id, cancellationToken);
         ResourceAccess.MatchRevision(expectedRevision, target.Revision);
         await ResourceAccess.RequireIdleAsync(jobs, deploymentId, cancellationToken);
+        ResourceAccess.RequireReferences(account.Id,
+            request.SecretReferences.Select(pair => ($"secretReferences.{pair.Key}", pair.Value)),
+            null, access.Value);
         target.UpdateConfiguration(Definition(request), DateTimeOffset.UtcNow);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);

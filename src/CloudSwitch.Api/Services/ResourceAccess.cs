@@ -41,4 +41,13 @@ internal static class ResourceAccess
             || target.Configuration.Inputs.Keys.Except(approved.AllowedInputs).Any())
             throw new ApiRequestException(400, "invalid_recovery_target", "Recovery must reference an approved target belonging to this deployment.");
     }
+
+    public static void RequireReferences(Guid userId, IEnumerable<(string Field, string Reference)> secrets,
+        TrafficConfiguration? traffic, AccessOptions options)
+    {
+        // One answer for foreign, mistyped and non-existent references: the API never asks Vault.
+        if (ReferenceAccess.FindDenied(userId, secrets, traffic, options) is { } field)
+            throw new ApiRequestException(400, "reference_not_permitted",
+                $"The reference in '{field}' is not permitted for this account.");
+    }
 }

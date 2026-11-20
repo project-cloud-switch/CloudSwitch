@@ -21,6 +21,7 @@ builder.Services.AddControllers(options =>
         options.Filters.Add(new ProducesResponseTypeAttribute(typeof(ProblemDetails), status, "application/problem+json"));
 });
 builder.Services.Configure<EndpointOptions>(builder.Configuration.GetSection("Endpoints"));
+builder.Services.Configure<AccessOptions>(builder.Configuration.GetSection("Access"));
 builder.Services.AddApiAuthentication(builder.Configuration, builder.Environment);
 builder.Services.AddApiRateLimiting(builder.Configuration);
 builder.Services.AddApiInfrastructure(builder.Configuration);

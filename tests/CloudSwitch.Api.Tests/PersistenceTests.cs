@@ -28,7 +28,12 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
         return client;
     }
 
-    internal static DeploymentRequest Definition() => new()
+    internal static async Task<Guid> UserIdAsync(HttpClient client)
+        => (await client.GetFromJsonAsync<Account>("/api/v1/me"))!.Id;
+
+    internal static string Secret(Guid userId, string rest) => $"vault://users/{userId:D}/{rest}";
+
+    internal static DeploymentRequest Definition(Guid userId) => new()
     {
         Name = "demo",
         Definition = new DeploymentDefinitionDto
@@ -37,7 +42,7 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
             Application = new ApplicationConfiguration
             {
                 Image = "nginx@sha256:" + new string('a', 64), Port = 80, CpuMillicores = 500, MemoryMegabytes = 256,
-                SecretReferences = new() { ["API_KEY"] = "vault://demo#api-key" }
+                SecretReferences = new() { ["API_KEY"] = Secret(userId, "demo#api-key") }
             },
             HealthCheck = new HealthCheckPolicy { Path = "/health", IntervalSeconds = 10, TimeoutSeconds = 3, FailureThreshold = 3, RecoveryThreshold = 2 },
             Traffic = new TrafficConfiguration { Driver = "simulation", RecordName = "app.example.test" }
@@ -46,7 +51,7 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
 
     internal static async Task<DeploymentResponse> CreateDeploymentAsync(HttpClient client)
     {
-        using var response = await client.PostAsJsonAsync("/api/v1/deployments", Definition());
+        using var response = await client.PostAsJsonAsync("/api/v1/deployments", Definition(await UserIdAsync(client)));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<DeploymentResponse>())!;
     }
@@ -71,10 +76,11 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
     public async Task Tagged_image_and_registry_vault_reference_reach_the_agreed_snapshot()
     {
         using var client = Client();
-        var input = Definition();
+        var userId = await UserIdAsync(client);
+        var input = Definition(userId);
         input = input with { Definition = input.Definition with { Application = input.Definition.Application with
         {
-            Image = "registry.example.test/demo:1.2.3", ImagePullSecretReference = "vault://registry#token"
+            Image = "registry.example.test/demo:1.2.3", ImagePullSecretReference = Secret(userId, "registry#token")
         } } };
         using var created = await client.PostAsJsonAsync("/api/v1/deployments", input);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
@@ -84,9 +90,9 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
         Assert.Equal(HttpStatusCode.Accepted, submitted.StatusCode);
         var job = (await submitted.Content.ReadFromJsonAsync<JobResponse>())!;
         Assert.Equal("registry.example.test/demo:1.2.3", job.Specification.ContainerImage);
-        Assert.Equal("vault://registry#token", job.Specification.ImagePullSecretReference);
+        Assert.Equal(Secret(userId, "registry#token"), job.Specification.ImagePullSecretReference);
         Assert.Equal(0.5, job.Specification.CpuCores);
-        Assert.Equal("vault://demo#api-key", job.Specification.SecretReferences!["API_KEY"]);
+        Assert.Equal(Secret(userId, "demo#api-key"), job.Specification.SecretReferences!["API_KEY"]);
         Assert.Equal("app.example.test", job.Specification.EntrypointDomain);
     }
 
@@ -125,14 +131,15 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
     public async Task Updates_require_current_etag_and_deletion_preserves_history()
     {
         using var client = Client();
+        var userId = await UserIdAsync(client);
         var deployment = await CreateDeploymentAsync(client);
-        using var missing = await client.PutAsJsonAsync($"/api/v1/deployments/{deployment.Id}", Definition());
+        using var missing = await client.PutAsJsonAsync($"/api/v1/deployments/{deployment.Id}", Definition(userId));
         Assert.Equal((HttpStatusCode)428, missing.StatusCode);
         client.DefaultRequestHeaders.IfMatch.Add(new EntityTagHeaderValue("\"1\""));
-        using var updated = await client.PutAsJsonAsync($"/api/v1/deployments/{deployment.Id}", Definition() with { Name = "updated" });
+        using var updated = await client.PutAsJsonAsync($"/api/v1/deployments/{deployment.Id}", Definition(userId) with { Name = "updated" });
         Assert.Equal(HttpStatusCode.OK, updated.StatusCode);
         Assert.Equal("\"2\"", updated.Headers.ETag?.Tag);
-        using var stale = await client.PutAsJsonAsync($"/api/v1/deployments/{deployment.Id}", Definition());
+        using var stale = await client.PutAsJsonAsync($"/api/v1/deployments/{deployment.Id}", Definition(userId));
         Assert.Equal(HttpStatusCode.PreconditionFailed, stale.StatusCode);
         client.DefaultRequestHeaders.IfMatch.Clear();
         client.DefaultRequestHeaders.IfMatch.Add(new EntityTagHeaderValue("\"2\""));
@@ -148,20 +155,21 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
     public async Task Revision_headers_keep_exact_matching_and_ownership_checks()
     {
         using var owner = Client();
+        var userId = await UserIdAsync(owner);
         using var stranger = Client("revision-stranger");
         var deployment = await CreateDeploymentAsync(owner);
         foreach (var value in new[] { "1", "\"01\"", "W/\"1\"", "*", "\"1\", \"2\"" })
         {
             using var request = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/deployments/{deployment.Id}")
             {
-                Content = JsonContent.Create(Definition())
+                Content = JsonContent.Create(Definition(userId))
             };
             request.Headers.TryAddWithoutValidation("If-Match", value);
             using var response = await owner.SendAsync(request);
             Assert.Equal(HttpStatusCode.PreconditionFailed, response.StatusCode);
         }
 
-        using var foreignUpdate = await stranger.PutAsJsonAsync($"/api/v1/deployments/{deployment.Id}", Definition());
+        using var foreignUpdate = await stranger.PutAsJsonAsync($"/api/v1/deployments/{deployment.Id}", Definition(userId));
         Assert.Equal(HttpStatusCode.NotFound, foreignUpdate.StatusCode);
     }
 
@@ -169,7 +177,8 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
     public async Task Unsafe_or_incomplete_configuration_is_rejected()
     {
         using var client = Client();
-        var valid = Definition();
+        var userId = await UserIdAsync(client);
+        var valid = Definition(userId);
         foreach (var definition in new[]
         {
             valid.Definition with { SourceEndpoint = new Uri("http://169.254.169.254/latest/meta-data") },
@@ -203,6 +212,7 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
     public async Task Job_and_outbox_are_saved_without_a_broker_and_retries_are_idempotent()
     {
         using var client = Client();
+        var userId = await UserIdAsync(client);
         var deployment = await CreateDeploymentAsync(client);
         var target = await CreateTargetAsync(client, deployment.Id);
         var otherTarget = await CreateTargetAsync(client, deployment.Id);
@@ -226,10 +236,10 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
         Assert.Equal($"{target.Configuration.ModuleId}:{target.Configuration.ModuleRevision}", job.Specification.TerraformModule);
         Assert.Equal(DeploymentHealthStatus.Unknown,
             (await client.GetFromJsonAsync<System.Text.Json.JsonElement>($"/api/v1/deployments/{deployment.Id}/health")).GetProperty("status").Deserialize<DeploymentHealthStatus>());
-        using var frozen = await client.PutAsJsonAsync($"/api/v1/deployments/{deployment.Id}", Definition());
+        using var frozen = await client.PutAsJsonAsync($"/api/v1/deployments/{deployment.Id}", Definition(userId));
         Assert.Equal((HttpStatusCode)428, frozen.StatusCode);
         client.DefaultRequestHeaders.IfMatch.Add(new EntityTagHeaderValue("\"1\""));
-        using var activeUpdate = await client.PutAsJsonAsync($"/api/v1/deployments/{deployment.Id}", Definition());
+        using var activeUpdate = await client.PutAsJsonAsync($"/api/v1/deployments/{deployment.Id}", Definition(userId));
         Assert.Equal(HttpStatusCode.Conflict, activeUpdate.StatusCode);
     }
 
@@ -266,6 +276,7 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
     public async Task Editing_configuration_does_not_change_an_existing_job_snapshot()
     {
         using var client = Client();
+        var userId = await UserIdAsync(client);
         var deployment = await CreateDeploymentAsync(client);
         var target = await CreateTargetAsync(client, deployment.Id);
         using var first = await SubmitAsync(client, deployment.Id, target.Id, "snapshot");
@@ -273,7 +284,7 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
         await using (var db = fixture.CreateDb())
             await db.Jobs.Where(x => x.Id == original.Id).ExecuteUpdateAsync(update => update.SetProperty(x => x.Status, Domain.JobStatus.Failed));
         client.DefaultRequestHeaders.IfMatch.Add(new EntityTagHeaderValue("\"1\""));
-        var updatedDefinition = Definition();
+        var updatedDefinition = Definition(userId);
         updatedDefinition = updatedDefinition with { Definition = updatedDefinition.Definition with
         { Application = updatedDefinition.Definition.Application with { Image = "nginx@sha256:" + new string('b', 64) } } };
         using var changed = await client.PutAsJsonAsync($"/api/v1/deployments/{deployment.Id}", updatedDefinition);
@@ -307,6 +318,7 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
     public async Task Automatic_recovery_rechecks_policy_and_revision_and_deduplicates_failed_incidents()
     {
         using var client = Client();
+        var userId = await UserIdAsync(client);
         var deployment = await CreateDeploymentAsync(client);
         var target = await CreateTargetAsync(client, deployment.Id);
         var incident = Domain.Incident.Open(deployment.Id, DateTimeOffset.UtcNow);
@@ -323,7 +335,7 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
         // NotifyOnly does not create a job even with a confirmed failure.
         await Assert.ThrowsAsync<OperationRejectedException>(() => SubmitAutomaticAsync(command));
         client.DefaultRequestHeaders.IfMatch.Add(new EntityTagHeaderValue("\"1\""));
-                var updated = Definition();
+                var updated = Definition(userId);
         updated = updated with { Definition = updated.Definition with
         {
             Recovery = new RecoveryPolicy { Mode = RecoveryMode.Automatic, TargetConfigurationId = target.Id },
