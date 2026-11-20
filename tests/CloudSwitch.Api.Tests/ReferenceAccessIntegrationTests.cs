@@ -7,6 +7,8 @@ using CloudSwitch.Contracts;
 using CloudSwitch.Persistence;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using Microsoft.EntityFrameworkCore; 
+using Domain = CloudSwitch.Persistence.Domain;
 
 namespace CloudSwitch.Api.Tests;
 
@@ -69,12 +71,10 @@ public sealed class ReferenceAccessIntegrationTests(DatabaseFixture fixture)
             await AssertRejectedAsync(response, reference, "reference_not_permitted");
         }
 
-        // Обход пути отклоняется уже проверкой формата.
         using var traversal = await owner.PostAsJsonAsync("/api/v1/deployments",
             WithSecret(ownerId, $"vault://users/{ownerId:D}/../{strangerId:D}/app#key"));
         Assert.Equal(HttpStatusCode.BadRequest, traversal.StatusCode);
 
-        // Обновление проверяется так же.
         var deployment = await PersistenceTests.CreateDeploymentAsync(owner);
         owner.DefaultRequestHeaders.IfMatch.Add(new EntityTagHeaderValue("\"1\""));
         var foreign = PersistenceTests.Secret(strangerId, "app#key");
@@ -142,5 +142,38 @@ public sealed class ReferenceAccessIntegrationTests(DatabaseFixture fixture)
         using var denied = await withoutGrant.PostAsJsonAsync("/api/v1/deployments",
             WithTraffic(userId, "example.test", "app.example.test", credential));
         await AssertRejectedAsync(denied, "example.test", "reference_not_permitted");
+    }
+
+    [DatabaseFact]
+    public async Task Revoked_dns_zone_blocks_new_jobs_but_a_replay_still_returns_the_original_job()
+    {
+        var subject = Unique("access-revoke");
+        using var plain = Client(subject);
+        var userId = await PersistenceTests.UserIdAsync(plain);
+        using var granted = Client(subject, options => options.DnsZones = [new DnsZoneGrant { Zone = "example.test", UserIds = [userId] }]);
+
+        using var created = await granted.PostAsJsonAsync("/api/v1/deployments",
+            WithTraffic(userId, "example.test", "app.example.test", PersistenceTests.Secret(userId, "dns#token")));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var deployment = (await created.Content.ReadFromJsonAsync<DeploymentResponse>())!;
+        var target = await PersistenceTests.CreateTargetAsync(granted, deployment.Id);
+
+        using var first = await PersistenceTests.SubmitAsync(granted, deployment.Id, target.Id, "granted-key");
+        Assert.Equal(HttpStatusCode.Accepted, first.StatusCode);
+        var job = (await first.Content.ReadFromJsonAsync<JobResponse>())!;
+        await using (var db = fixture.CreateDb())
+            await db.Jobs.Where(x => x.Id == job.Id)
+                .ExecuteUpdateAsync(update => update.SetProperty(x => x.Status, Domain.JobStatus.Failed));
+
+        using var revoked = Client(subject);
+        using var denied = await PersistenceTests.SubmitAsync(revoked, deployment.Id, target.Id, "after-revoke");
+        Assert.Equal(HttpStatusCode.Conflict, denied.StatusCode);
+        var body = await denied.Content.ReadAsStringAsync();
+        Assert.Equal("reference_access_denied", JsonDocument.Parse(body).RootElement.GetProperty("code").GetString());
+        Assert.DoesNotContain("example.test", body);
+
+        using var replay = await PersistenceTests.SubmitAsync(revoked, deployment.Id, target.Id, "granted-key");
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        Assert.Equal(job.Id, (await replay.Content.ReadFromJsonAsync<JobResponse>())!.Id);
     }
 }
