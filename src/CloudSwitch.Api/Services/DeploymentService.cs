@@ -15,14 +15,17 @@ public sealed class DeploymentService(
     JobRepository jobs,
     UnitOfWork unitOfWork,
     ApprovedModules modules,
-    IOptions<EndpointOptions> options)
+    IOptions<EndpointOptions> endpointOptions,
+    IOptions<AccessOptions> accessOptions)
 {
     public async Task<Deployment> CreateAsync(DeploymentRequest request, CancellationToken cancellationToken)
     {
-        RequestValidation.ThrowIfInvalid(RequestValidation.Deployment(request, options.Value));
+        RequestValidation.ThrowIfInvalid(RequestValidation.Deployment(request, endpointOptions.Value));
         var account = await accounts.GetAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
         var deployment = Deployment.Register(account.Id, request.Name, request.Definition.ToDomain(), now);
+        ResourceAccess.RequireReferences(account.Id, ReferenceAccess.Collect(deployment.Definition),
+            deployment.Definition.Traffic, accessOptions.Value);
         await ResourceAccess.ValidateRecoveryAsync(targets, deployment.Id, deployment.Definition, modules, cancellationToken);
         deployments.Add(deployment);
         await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -45,7 +48,7 @@ public sealed class DeploymentService(
     public async Task<Deployment> UpdateAsync(
         Guid id, DeploymentRequest request, long? expectedRevision, CancellationToken cancellationToken)
     {
-        RequestValidation.ThrowIfInvalid(RequestValidation.Deployment(request, options.Value));
+        RequestValidation.ThrowIfInvalid(RequestValidation.Deployment(request, endpointOptions.Value));
         var account = await accounts.GetAsync(cancellationToken);
         await using var transaction = await unitOfWork.BeginDeploymentTransactionAsync(id, cancellationToken);
         var deployment = await ResourceAccess.DeploymentAsync(deployments, id, account.Id, cancellationToken);
@@ -53,6 +56,7 @@ public sealed class DeploymentService(
         await ResourceAccess.RequireIdleAsync(jobs, id, cancellationToken);
         var definition = request.Definition.ToDomain();
         await ResourceAccess.ValidateRecoveryAsync(targets, id, definition, modules, cancellationToken);
+        ResourceAccess.RequireReferences(account.Id, ReferenceAccess.Collect(definition), definition.Traffic, accessOptions.Value);
         deployment.UpdateConfiguration(request.Name, definition, DateTimeOffset.UtcNow);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
