@@ -5,7 +5,7 @@ using MassTransit;
 namespace CloudSwitch.Worker.Recovery;
 
 /// <summary>Process-local test implementation. The executable host uses PostgreSQL.</summary>
-public sealed class InMemoryJobLeaseStore(IPublishEndpoint publisher, TimeProvider? timeProvider = null) : IJobLeaseStore
+public sealed class InMemoryJobLeaseStore(IPublishEndpoint publisher, TimeProvider? timeProvider = null, int pendingGracePeriodSeconds = 60) : IJobLeaseStore
 {
     private sealed record State(DeploymentRequested Request, int Attempt, long Fence, long Sequence,
         JobStatus Status, MigrationPhase Phase, CutoverOutcome Cutover, Uri? Endpoint,
@@ -100,10 +100,17 @@ public sealed class InMemoryJobLeaseStore(IPublishEndpoint publisher, TimeProvid
     public Task<IReadOnlyList<DeploymentRequested>> FindStaleJobsAsync(DateTimeOffset asOf, int limit,
         CancellationToken cancellationToken = default)
     {
+        var graceCutoff = asOf.AddSeconds(-pendingGracePeriodSeconds);
         lock (sync)
             return Task.FromResult<IReadOnlyList<DeploymentRequested>>(jobs.Values
-                .Where(job => (job.Status == JobStatus.Pending || job.Status == JobStatus.Running) && job.ExpiresAt <= asOf)
-                .OrderBy(job => job.ExpiresAt).Take(limit).Select(job => job.Request).ToList());
+                .Where(job =>
+                    ((job.Status == JobStatus.Pending || job.Status == JobStatus.Running) && job.ExpiresAt != null && job.ExpiresAt <= asOf)
+                    || (job.Status == JobStatus.Pending && job.ExpiresAt == null && job.Request.OccurredAt <= graceCutoff))
+                .OrderBy(job => job.ExpiresAt ?? job.Request.OccurredAt)
+                .ThenBy(job => job.Request.JobId)
+                .Take(limit)
+                .Select(job => job.Request)
+                .ToList());
     }
 
     private bool Owns(State job, JobLease lease)

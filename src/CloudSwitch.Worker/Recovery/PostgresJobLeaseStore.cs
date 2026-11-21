@@ -8,8 +8,10 @@ using Domain = CloudSwitch.Persistence.Domain;
 
 namespace CloudSwitch.Worker.Recovery;
 
-public sealed class PostgresJobLeaseStore(IServiceScopeFactory scopes) : IJobLeaseStore
+public sealed class PostgresJobLeaseStore(IServiceScopeFactory scopes, Microsoft.Extensions.Options.IOptions<WorkerOptions>? options = null) : IJobLeaseStore
 {
+    private readonly int gracePeriodSeconds = options?.Value.PendingGracePeriodSeconds ?? 60;
+
     public async Task<JobLease?> TryAcquireAsync(DeploymentRequested request, string workerId, TimeSpan duration,
         int maxAttempts, CancellationToken cancellationToken = default)
     {
@@ -31,6 +33,13 @@ public sealed class PostgresJobLeaseStore(IServiceScopeFactory scopes) : IJobLea
                 uncertain ? Domain.MigrationPhase.TrafficCutover : job.Phase,
                 uncertain ? Domain.CutoverOutcome.Uncertain : job.Cutover,
                 job.TargetEndpoint, "RETRY_LIMIT_EXHAUSTED", "The job requires manual recovery after exhausting its retry limit.", now);
+            var guard = await db.TrafficGuards
+                .Where(g => g.ActiveJobId == job.Id && g.State == Domain.TrafficGuardState.Active)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (uncertain)
+                guard?.MarkUncertain(now, "Retry limit exhausted with uncertain traffic cutover.");
+            else
+                guard?.Clear("system", "Retry limit exhausted before traffic cutover.", now);
             await SaveProgressAsync(scope.ServiceProvider, db, progress, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return null;
@@ -83,6 +92,21 @@ public sealed class PostgresJobLeaseStore(IServiceScopeFactory scopes) : IJobLea
                 db.Runtimes.Add(Domain.DeploymentRuntime.Activate(job.DeploymentId, migration.Target.Provider, endpoint, 1, now));
             else
                 runtime.Activate(migration.Target.Provider, endpoint, now);
+
+            var guard = await db.TrafficGuards
+                .Where(g => g.ActiveJobId == job.Id && g.State == Domain.TrafficGuardState.Active)
+                .FirstOrDefaultAsync(cancellationToken);
+            guard?.Clear("system", "Migration completed and entrypoint verified successfully.", now);
+        }
+        else if (status == JobStatus.Failed)
+        {
+            var guard = await db.TrafficGuards
+                .Where(g => g.ActiveJobId == job.Id && g.State == Domain.TrafficGuardState.Active)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (cutover is CutoverOutcome.Applied or CutoverOutcome.Uncertain)
+                guard?.MarkUncertain(now, errorMessage ?? "Interrupted traffic cutover requires reconciliation.");
+            else
+                guard?.Clear("system", errorMessage ?? "Safe failure before traffic cutover.", now);
         }
         var previous = job.Sequence == lease.Sequence ? ContractMapping.ConvertEnum<Domain.JobStatus>(lease.PreviousStatus) : job.Status;
         var progress = job.RecordProgress(ContractMapping.ConvertEnum<Domain.JobStatus>(status),
@@ -99,8 +123,15 @@ public sealed class PostgresJobLeaseStore(IServiceScopeFactory scopes) : IJobLea
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<CloudSwitchDbContext>();
         var now = await DatabaseTimeAsync(db, cancellationToken);
-        var jobs = await db.Jobs.AsNoTracking().Where(job => (job.Status == Domain.JobStatus.Pending || job.Status == Domain.JobStatus.Running) && job.LeaseExpiresAt <= now)
-            .OrderBy(job => job.LeaseExpiresAt).ThenBy(job => job.Id).Take(limit).ToListAsync(cancellationToken);
+        var graceCutoff = now.AddSeconds(-gracePeriodSeconds);
+        var jobs = await db.Jobs.AsNoTracking()
+            .Where(job =>
+                ((job.Status == Domain.JobStatus.Pending || job.Status == Domain.JobStatus.Running) && job.LeaseExpiresAt != null && job.LeaseExpiresAt <= now)
+                || (job.Status == Domain.JobStatus.Pending && job.LeaseExpiresAt == null && job.CreatedAt <= graceCutoff))
+            .OrderBy(job => job.LeaseExpiresAt ?? job.CreatedAt)
+            .ThenBy(job => job.Id)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
         return jobs.Select(job => job.Request.ToContract()).ToList();
     }
 

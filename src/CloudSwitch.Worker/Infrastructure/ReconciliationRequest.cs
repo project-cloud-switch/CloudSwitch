@@ -1,3 +1,5 @@
+using CloudSwitch.Contracts;
+
 namespace CloudSwitch.Worker.Infrastructure;
 
 /// <summary>
@@ -10,5 +12,9 @@ public sealed record ReconciliationRequest
     public required string TerraformModule { get; init; }
     public string? ExpectedTargetEndpoint { get; init; }
     public string? StateFingerprint { get; init; }
+    public DeploymentSpecification? Specification { get; init; }
+    public Guid? TargetConfigurationId { get; init; }
+    public long FencingToken { get; init; } = 0;
+    public string? ExpectedApplicationIdentity { get; init; }
     public string? WorkingDirectory { get; init; }
 }

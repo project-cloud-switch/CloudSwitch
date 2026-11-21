@@ -69,7 +69,17 @@ public static class ContractMapping
             TargetConfigurationId = value.Migration?.Target.Id,
             TerraformModule = value.Migration is { } migration ? $"{migration.Target.ModuleId}:{migration.Target.ModuleRevision}" : null,
             HealthCheck = value.Migration?.TargetHealthCheck.ToContract(),
-            EntrypointDomain = value.Migration?.Traffic.RecordName, TrafficRoutingProvider = value.Migration?.Traffic.Driver
+            EntrypointDomain = value.Migration?.Traffic.RecordName, TrafficRoutingProvider = value.Migration?.Traffic.Driver,
+            TargetModuleSource = value.Migration?.Target.ModuleSource,
+            TargetModuleRevision = value.Migration?.Target.ModuleRevision,
+            TargetInputs = value.Migration?.Target.Inputs is { Count: > 0 } inputs ? new Dictionary<string, string>(inputs) : null,
+            TargetSecretReferences = value.Migration?.Target.SecretReferences is { Count: > 0 } targetSecrets ? new Dictionary<string, string>(targetSecrets) : null,
+            TrafficZoneReference = value.Migration?.Traffic.ZoneReference,
+            TrafficCredentialReference = value.Migration?.Traffic.CredentialReference,
+            SourceProvider = value.Migration?.Source.Provider,
+            SourceEndpoint = value.Migration?.Source.Endpoint.ToString(),
+            SourceRuntimeRevision = value.Migration?.Source.RuntimeRevision,
+            ConfigurationRevision = value.Migration?.ConfigurationRevision
         };
 
     public static Events.DeploymentRequested ToContract(this Domain.JobRequestSnapshot value)

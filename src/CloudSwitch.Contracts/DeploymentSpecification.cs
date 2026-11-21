@@ -41,6 +41,36 @@ public sealed record DeploymentSpecification
     /// <summary>Provider handling traffic routing / DNS cutover (e.g. Cloudflare, Route53).</summary>
     public string? TrafficRoutingProvider { get; init; }
 
+    /// <summary>Source module definition or path for the target provider (e.g. modules/selectel/container-vm).</summary>
+    public string? TargetModuleSource { get; init; }
+
+    /// <summary>Pinned revision, tag or commit hash of the target module.</summary>
+    public string? TargetModuleRevision { get; init; }
+
+    /// <summary>Approved input parameters for the target Terraform module.</summary>
+    public IReadOnlyDictionary<string, string>? TargetInputs { get; init; }
+
+    /// <summary>Secret references specific to target provider resources (e.g. vault://path#key).</summary>
+    public IReadOnlyDictionary<string, string>? TargetSecretReferences { get; init; }
+
+    /// <summary>DNS zone or hosted zone reference for the traffic entrypoint.</summary>
+    public string? TrafficZoneReference { get; init; }
+
+    /// <summary>Vault credential reference for traffic/DNS provider API authentication.</summary>
+    public string? TrafficCredentialReference { get; init; }
+
+    /// <summary>Provider of the source deployment prior to migration.</summary>
+    public string? SourceProvider { get; init; }
+
+    /// <summary>Direct endpoint of the source deployment prior to migration.</summary>
+    public string? SourceEndpoint { get; init; }
+
+    /// <summary>Runtime revision of the source deployment at submission time.</summary>
+    public long? SourceRuntimeRevision { get; init; }
+
+    /// <summary>Configuration revision of the deployment at submission time.</summary>
+    public long? ConfigurationRevision { get; init; }
+
     public bool Equals(DeploymentSpecification? other)
     {
         if (other is null) return false;
@@ -59,8 +89,18 @@ public sealed record DeploymentSpecification
             && Equals(HealthCheck, other.HealthCheck)
             && EntrypointDomain == other.EntrypointDomain
             && TrafficRoutingProvider == other.TrafficRoutingProvider
+            && TargetModuleSource == other.TargetModuleSource
+            && TargetModuleRevision == other.TargetModuleRevision
+            && TrafficZoneReference == other.TrafficZoneReference
+            && TrafficCredentialReference == other.TrafficCredentialReference
+            && SourceProvider == other.SourceProvider
+            && SourceEndpoint == other.SourceEndpoint
+            && SourceRuntimeRevision == other.SourceRuntimeRevision
+            && ConfigurationRevision == other.ConfigurationRevision
             && DictionariesEqual(Env, other.Env)
-            && DictionariesEqual(SecretReferences, other.SecretReferences);
+            && DictionariesEqual(SecretReferences, other.SecretReferences)
+            && DictionariesEqual(TargetInputs, other.TargetInputs)
+            && DictionariesEqual(TargetSecretReferences, other.TargetSecretReferences);
     }
 
     public override int GetHashCode()
@@ -79,8 +119,18 @@ public sealed record DeploymentSpecification
         hash.Add(HealthCheck);
         hash.Add(EntrypointDomain);
         hash.Add(TrafficRoutingProvider);
+        hash.Add(TargetModuleSource);
+        hash.Add(TargetModuleRevision);
+        hash.Add(TrafficZoneReference);
+        hash.Add(TrafficCredentialReference);
+        hash.Add(SourceProvider);
+        hash.Add(SourceEndpoint);
+        hash.Add(SourceRuntimeRevision);
+        hash.Add(ConfigurationRevision);
         hash.Add(GetDictionaryHashCode(Env));
         hash.Add(GetDictionaryHashCode(SecretReferences));
+        hash.Add(GetDictionaryHashCode(TargetInputs));
+        hash.Add(GetDictionaryHashCode(TargetSecretReferences));
         return hash.ToHashCode();
     }
 

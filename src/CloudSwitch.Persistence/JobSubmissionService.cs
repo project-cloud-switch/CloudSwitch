@@ -1,6 +1,7 @@
 using CloudSwitch.Persistence.Domain;
 using MassTransit;
 using CloudSwitch.Persistence.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 namespace CloudSwitch.Persistence;
 
@@ -22,8 +23,10 @@ public sealed class JobSubmissionService(
     JobRepository jobs,
     UnitOfWork unitOfWork,
     IPublishEndpoint publisher,
-    ApprovedModules modules)
+    ApprovedModules modules,
+    CloudSwitchDbContext? db = null)
 {
+    private readonly CloudSwitchDbContext database = db ?? unitOfWork.Db;
     public async Task<SubmissionResult> SubmitAsync(SubmitJob command, CancellationToken ct)
     {
         if (command.DeploymentId == Guid.Empty || command.UserId == Guid.Empty || command.TargetConfigurationId == Guid.Empty
@@ -53,6 +56,31 @@ public sealed class JobSubmissionService(
             throw Reject(RejectionKind.NotFound, "deployment_not_found", "Deployment was not found.");
         if (await jobs.HasActiveAsync(deployment.Id, ct))
             throw Reject(RejectionKind.Conflict, "active_job_exists", "A migration is already active for this deployment.");
+
+        var recordName = deployment.Definition.Traffic.RecordName;
+        var normalizedRecord = TrafficGuard.NormalizeRecord(recordName);
+
+        if (database.Database.IsNpgsql())
+        {
+            await database.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtextextended({normalizedRecord}, 0))", ct);
+        }
+
+        var activeOrUncertainGuard = await database.TrafficGuards
+            .Where(g => (g.NormalizedRecord == normalizedRecord || g.DeploymentId == deployment.Id)
+                && (g.State == TrafficGuardState.Active || g.State == TrafficGuardState.Uncertain))
+            .FirstOrDefaultAsync(ct);
+
+        if (activeOrUncertainGuard is not null)
+        {
+            if (activeOrUncertainGuard.State == TrafficGuardState.Uncertain)
+                throw Reject(RejectionKind.Conflict, "traffic_state_uncertain",
+                    $"Traffic routing for '{activeOrUncertainGuard.RecordName}' is uncertain from an interrupted migration and requires authorized reconciliation.");
+            if (activeOrUncertainGuard.State == TrafficGuardState.Active)
+                throw Reject(RejectionKind.Conflict, "traffic_record_busy",
+                    $"A migration is already actively coordinating traffic for record '{activeOrUncertainGuard.RecordName}'.");
+        }
+
         var target = await targets.FindAsync(deployment.Id, command.TargetConfigurationId, ct)
             ?? throw Reject(RejectionKind.NotFound, "target_not_found", "Target configuration was not found.");
         var approved = modules.Find(target.Configuration.ModuleId, target.Configuration.Provider);
@@ -93,8 +121,16 @@ public sealed class JobSubmissionService(
                 deployment.Definition.Application, deployment.Definition.HealthCheck, deployment.Definition.Traffic));
         var job = Job.Create(deployment.Id, deployment.UserId, specification, command.Trigger,
             command.IdempotencyKey, command.IncidentId, command.CorrelationId, now);
+        var guard = TrafficGuard.Create(
+            deployment.Id,
+            deployment.Definition.Traffic.Driver,
+            deployment.Definition.Traffic.ZoneReference,
+            recordName,
+            job.Id,
+            now);
         var request = job.Request.ToContract();
         jobs.Add(job);
+        database.TrafficGuards.Add(guard);
         await publisher.Publish(request, publish =>
         {
             publish.MessageId = request.EventId;
