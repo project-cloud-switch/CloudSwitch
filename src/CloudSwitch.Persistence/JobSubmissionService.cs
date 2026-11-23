@@ -1,6 +1,7 @@
 using CloudSwitch.Persistence.Domain;
 using MassTransit;
 using CloudSwitch.Persistence.Repositories;
+using Microsoft.EntityFrameworkCore;
 
 namespace CloudSwitch.Persistence;
 
@@ -22,8 +23,10 @@ public sealed class JobSubmissionService(
     JobRepository jobs,
     UnitOfWork unitOfWork,
     IPublishEndpoint publisher,
-    ApprovedModules modules)
+    ApprovedModules modules,
+    CloudSwitchDbContext? db = null)
 {
+    private readonly CloudSwitchDbContext database = db ?? unitOfWork.Db;
     public async Task<SubmissionResult> SubmitAsync(SubmitJob command, CancellationToken ct)
     {
         if (command.DeploymentId == Guid.Empty || command.UserId == Guid.Empty || command.TargetConfigurationId == Guid.Empty
@@ -53,6 +56,27 @@ public sealed class JobSubmissionService(
             throw Reject(RejectionKind.NotFound, "deployment_not_found", "Deployment was not found.");
         if (await jobs.HasActiveAsync(deployment.Id, ct))
             throw Reject(RejectionKind.Conflict, "active_job_exists", "A migration is already active for this deployment.");
+
+        var recordName = deployment.Definition.Traffic.RecordName;
+        var normalizedRecord = TrafficGuard.NormalizeRecord(recordName);
+
+        if (database.Database.IsNpgsql())
+        {
+            await database.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtextextended({normalizedRecord}, 0))", ct);
+        }
+
+        var uncertainGuard = await database.TrafficGuards
+            .Where(g => (g.NormalizedRecord == normalizedRecord || g.DeploymentId == deployment.Id)
+                && g.State == TrafficGuardState.Uncertain)
+            .FirstOrDefaultAsync(ct);
+
+        if (uncertainGuard is not null)
+        {
+            throw Reject(RejectionKind.Conflict, "traffic_state_uncertain",
+                $"Traffic routing for '{uncertainGuard.RecordName}' is uncertain from an interrupted migration and requires authorized reconciliation.");
+        }
+
         var target = await targets.FindAsync(deployment.Id, command.TargetConfigurationId, ct)
             ?? throw Reject(RejectionKind.NotFound, "target_not_found", "Target configuration was not found.");
         var approved = modules.Find(target.Configuration.ModuleId, target.Configuration.Provider);

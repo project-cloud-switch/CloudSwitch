@@ -11,8 +11,36 @@ public sealed class JobRecoveryService(IJobLeaseStore store, IMigrationOrchestra
     public async Task RecoverStaleJobsAsync(CancellationToken cancellationToken = default)
     {
         var requests = await store.FindStaleJobsAsync(DateTimeOffset.UtcNow, 100, cancellationToken);
-        foreach (var request in requests)
-            await orchestrator.ExecuteMigrationAsync(request, cancellationToken);
+        if (requests.Count == 0)
+            return;
+
+        var maxConcurrency = Math.Max(1, options.Value.MaxConcurrentRecoveries);
+        using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+
+        var tasks = requests.Select(async request =>
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await orchestrator.ExecuteMigrationAsync(request, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Isolated recovery failure for JobId={JobId}, DeploymentId={DeploymentId}. Continuing recovery scan.",
+                    request.JobId, request.DeploymentId);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

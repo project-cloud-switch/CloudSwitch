@@ -16,5 +16,7 @@ public sealed record ProvisioningRequest
     public required string TerraformModule { get; init; }
     public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(5);
     public int Attempt { get; init; } = 1;
+    public long FencingToken { get; init; } = 0;
+    public string? ExpectedApplicationIdentity { get; init; }
     public string? WorkingDirectory { get; init; }
 }

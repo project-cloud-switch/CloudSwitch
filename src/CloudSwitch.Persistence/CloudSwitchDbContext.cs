@@ -23,6 +23,7 @@ public sealed class CloudSwitchDbContext(DbContextOptions<CloudSwitchDbContext> 
     public DbSet<JobEvent> JobEvents => Set<JobEvent>();
     public DbSet<Incident> Incidents => Set<Incident>();
     public DbSet<HealthObservation> Health => Set<HealthObservation>();
+    public DbSet<TrafficGuard> TrafficGuards => Set<TrafficGuard>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -106,6 +107,26 @@ public sealed class CloudSwitchDbContext(DbContextOptions<CloudSwitchDbContext> 
         {
             table.HasCheckConstraint("CK_Health_Status", "\"Status\" IN ('Unknown', 'Healthy', 'Unhealthy') AND (\"Status\" <> 'Unhealthy' OR \"IncidentId\" IS NOT NULL)");
             table.HasCheckConstraint("CK_Health_Counters", "\"Sequence\" > 0 AND \"ConsecutiveFailures\" >= 0 AND \"ConsecutiveSuccesses\" >= 0");
+        });
+
+        var guards = model.Entity<TrafficGuard>();
+        guards.HasKey(x => x.Id);
+        guards.HasOne<Deployment>().WithMany().HasForeignKey(x => x.DeploymentId).OnDelete(DeleteBehavior.Restrict);
+        guards.HasOne<Job>().WithMany().HasForeignKey(x => x.ActiveJobId).OnDelete(DeleteBehavior.Restrict);
+        guards.Property(x => x.Provider).HasMaxLength(128);
+        guards.Property(x => x.ZoneReference).HasMaxLength(256);
+        guards.Property(x => x.RecordName).HasMaxLength(256);
+        guards.Property(x => x.NormalizedRecord).HasMaxLength(256);
+        guards.Property(x => x.State).HasConversion<string>().HasMaxLength(16);
+        guards.Property(x => x.ClearedBy).HasMaxLength(256);
+        guards.Property(x => x.Evidence).HasMaxLength(2048);
+        guards.HasIndex(x => x.NormalizedRecord).IsUnique().HasDatabaseName("UX_TrafficGuards_ActiveRecord")
+            .HasFilter("\"State\" IN ('Active', 'Uncertain')");
+        guards.HasIndex(x => x.DeploymentId).HasDatabaseName("IX_TrafficGuards_Deployment")
+            .HasFilter("\"State\" IN ('Active', 'Uncertain')");
+        guards.ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_TrafficGuards_State", "\"State\" IN ('Active', 'Uncertain', 'Cleared')");
         });
 
         model.AddInboxStateEntity();

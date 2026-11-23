@@ -62,6 +62,12 @@ public sealed class Incident
         DomainGuard.Identity(deploymentId, nameof(DeploymentId));
         return new Incident { Id = Guid.NewGuid(), DeploymentId = deploymentId, StartedAt = now };
     }
+
+    public void Resolve(DateTimeOffset now)
+    {
+        DomainGuard.Require(ResolvedAt is null, "Incident is already resolved.");
+        ResolvedAt = now;
+    }
 }
 
 public sealed class HealthObservation
@@ -91,5 +97,22 @@ public sealed class HealthObservation
             Sequence = sequence, Status = status, IncidentId = incidentId, ConsecutiveFailures = failures,
             ConsecutiveSuccesses = successes, ObservedAt = now
         };
+    }
+
+    public void Update(long configurationRevision, long runtimeRevision,
+        long sequence, DeploymentHealthStatus status, Guid? incidentId, int failures, int successes, DateTimeOffset now)
+    {
+        DomainGuard.Require(configurationRevision > 0 && runtimeRevision >= 0 && sequence > 0
+            && failures >= 0 && successes >= 0 && Enum.IsDefined(status), "Health observation is invalid.");
+        DomainGuard.Require(status != DeploymentHealthStatus.Unhealthy || incidentId is { } id && id != Guid.Empty,
+            "An unhealthy observation requires an incident.");
+        ConfigurationRevision = configurationRevision;
+        RuntimeRevision = runtimeRevision;
+        Sequence = sequence;
+        Status = status;
+        IncidentId = incidentId;
+        ConsecutiveFailures = failures;
+        ConsecutiveSuccesses = successes;
+        ObservedAt = now;
     }
 }
