@@ -33,13 +33,34 @@ public sealed class PostgresJobLeaseStore(IServiceScopeFactory scopes, Microsoft
                 uncertain ? Domain.MigrationPhase.TrafficCutover : job.Phase,
                 uncertain ? Domain.CutoverOutcome.Uncertain : job.Cutover,
                 job.TargetEndpoint, "RETRY_LIMIT_EXHAUSTED", "The job requires manual recovery after exhausting its retry limit.", now);
+            var recordName = job.Request.Specification.Migration?.Traffic.RecordName;
+            var normalizedRecord = !string.IsNullOrWhiteSpace(recordName) ? Domain.TrafficGuard.NormalizeRecord(recordName) : null;
             var guard = await db.TrafficGuards
-                .Where(g => g.ActiveJobId == job.Id && g.State == Domain.TrafficGuardState.Active)
+                .Where(g => g.ActiveJobId == job.Id || (normalizedRecord != null && g.NormalizedRecord == normalizedRecord && g.State == Domain.TrafficGuardState.Uncertain))
                 .FirstOrDefaultAsync(cancellationToken);
             if (uncertain)
-                guard?.MarkUncertain(now, "Retry limit exhausted with uncertain traffic cutover.");
+            {
+                if (guard is not null)
+                {
+                    guard.MarkUncertain(now, "Retry limit exhausted with uncertain traffic cutover.");
+                }
+                else if (!string.IsNullOrWhiteSpace(recordName))
+                {
+                    var newGuard = Domain.TrafficGuard.Create(
+                        job.DeploymentId,
+                        job.Request.Specification.Migration?.Traffic.Driver ?? "unknown",
+                        job.Request.Specification.Migration?.Traffic.ZoneReference,
+                        recordName,
+                        job.Id,
+                        now);
+                    newGuard.MarkUncertain(now, "Retry limit exhausted with uncertain traffic cutover.");
+                    db.TrafficGuards.Add(newGuard);
+                }
+            }
             else
+            {
                 guard?.Clear("system", "Retry limit exhausted before traffic cutover.", now);
+            }
             await SaveProgressAsync(scope.ServiceProvider, db, progress, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return null;
@@ -93,20 +114,43 @@ public sealed class PostgresJobLeaseStore(IServiceScopeFactory scopes, Microsoft
             else
                 runtime.Activate(migration.Target.Provider, endpoint, now);
 
+            var recordName = job.Request.Specification.Migration?.Traffic.RecordName;
+            var normalizedRecord = !string.IsNullOrWhiteSpace(recordName) ? Domain.TrafficGuard.NormalizeRecord(recordName) : null;
             var guard = await db.TrafficGuards
-                .Where(g => g.ActiveJobId == job.Id && g.State == Domain.TrafficGuardState.Active)
+                .Where(g => g.ActiveJobId == job.Id || (normalizedRecord != null && g.NormalizedRecord == normalizedRecord && g.State != Domain.TrafficGuardState.Cleared))
                 .FirstOrDefaultAsync(cancellationToken);
             guard?.Clear("system", "Migration completed and entrypoint verified successfully.", now);
         }
         else if (status == JobStatus.Failed)
         {
+            var recordName = job.Request.Specification.Migration?.Traffic.RecordName;
+            var normalizedRecord = !string.IsNullOrWhiteSpace(recordName) ? Domain.TrafficGuard.NormalizeRecord(recordName) : null;
             var guard = await db.TrafficGuards
-                .Where(g => g.ActiveJobId == job.Id && g.State == Domain.TrafficGuardState.Active)
+                .Where(g => g.ActiveJobId == job.Id || (normalizedRecord != null && g.NormalizedRecord == normalizedRecord && g.State == Domain.TrafficGuardState.Uncertain))
                 .FirstOrDefaultAsync(cancellationToken);
             if (cutover is CutoverOutcome.Applied or CutoverOutcome.Uncertain)
-                guard?.MarkUncertain(now, errorMessage ?? "Interrupted traffic cutover requires reconciliation.");
+            {
+                if (guard is not null)
+                {
+                    guard.MarkUncertain(now, errorMessage ?? "Interrupted traffic cutover requires reconciliation.");
+                }
+                else if (!string.IsNullOrWhiteSpace(recordName))
+                {
+                    var newGuard = Domain.TrafficGuard.Create(
+                        job.DeploymentId,
+                        job.Request.Specification.Migration?.Traffic.Driver ?? "unknown",
+                        job.Request.Specification.Migration?.Traffic.ZoneReference,
+                        recordName,
+                        job.Id,
+                        now);
+                    newGuard.MarkUncertain(now, errorMessage ?? "Interrupted traffic cutover requires reconciliation.");
+                    db.TrafficGuards.Add(newGuard);
+                }
+            }
             else
+            {
                 guard?.Clear("system", errorMessage ?? "Safe failure before traffic cutover.", now);
+            }
         }
         var previous = job.Sequence == lease.Sequence ? ContractMapping.ConvertEnum<Domain.JobStatus>(lease.PreviousStatus) : job.Status;
         var progress = job.RecordProgress(ContractMapping.ConvertEnum<Domain.JobStatus>(status),

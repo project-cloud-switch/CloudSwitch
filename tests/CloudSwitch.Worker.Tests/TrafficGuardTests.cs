@@ -103,4 +103,18 @@ public sealed class TrafficGuardTests
         Assert.Throws<DomainException>(() =>
             TrafficGuard.Create(Guid.NewGuid(), "cloudflare", null, "", Guid.NewGuid(), now));
     }
+
+    [Fact]
+    public void Uncertain_traffic_guard_requires_reconciliation_before_clearing()
+    {
+        var guard = TrafficGuard.Create(
+            Guid.NewGuid(), "cloudflare", null, "app.example.com", Guid.NewGuid(), DateTimeOffset.UtcNow);
+
+        guard.MarkUncertain(DateTimeOffset.UtcNow, "DNS cutover interrupted");
+        Assert.Equal(TrafficGuardState.Uncertain, guard.State);
+
+        // Clearing with valid evidence succeeds
+        guard.Clear("operator@company.com", "Manual DNS check confirmed target routing.", DateTimeOffset.UtcNow);
+        Assert.Equal(TrafficGuardState.Cleared, guard.State);
+    }
 }

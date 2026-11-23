@@ -66,19 +66,15 @@ public sealed class JobSubmissionService(
                 $"SELECT pg_advisory_xact_lock(hashtextextended({normalizedRecord}, 0))", ct);
         }
 
-        var activeOrUncertainGuard = await database.TrafficGuards
+        var uncertainGuard = await database.TrafficGuards
             .Where(g => (g.NormalizedRecord == normalizedRecord || g.DeploymentId == deployment.Id)
-                && (g.State == TrafficGuardState.Active || g.State == TrafficGuardState.Uncertain))
+                && g.State == TrafficGuardState.Uncertain)
             .FirstOrDefaultAsync(ct);
 
-        if (activeOrUncertainGuard is not null)
+        if (uncertainGuard is not null)
         {
-            if (activeOrUncertainGuard.State == TrafficGuardState.Uncertain)
-                throw Reject(RejectionKind.Conflict, "traffic_state_uncertain",
-                    $"Traffic routing for '{activeOrUncertainGuard.RecordName}' is uncertain from an interrupted migration and requires authorized reconciliation.");
-            if (activeOrUncertainGuard.State == TrafficGuardState.Active)
-                throw Reject(RejectionKind.Conflict, "traffic_record_busy",
-                    $"A migration is already actively coordinating traffic for record '{activeOrUncertainGuard.RecordName}'.");
+            throw Reject(RejectionKind.Conflict, "traffic_state_uncertain",
+                $"Traffic routing for '{uncertainGuard.RecordName}' is uncertain from an interrupted migration and requires authorized reconciliation.");
         }
 
         var target = await targets.FindAsync(deployment.Id, command.TargetConfigurationId, ct)
@@ -121,16 +117,8 @@ public sealed class JobSubmissionService(
                 deployment.Definition.Application, deployment.Definition.HealthCheck, deployment.Definition.Traffic));
         var job = Job.Create(deployment.Id, deployment.UserId, specification, command.Trigger,
             command.IdempotencyKey, command.IncidentId, command.CorrelationId, now);
-        var guard = TrafficGuard.Create(
-            deployment.Id,
-            deployment.Definition.Traffic.Driver,
-            deployment.Definition.Traffic.ZoneReference,
-            recordName,
-            job.Id,
-            now);
         var request = job.Request.ToContract();
         jobs.Add(job);
-        database.TrafficGuards.Add(guard);
         await publisher.Publish(request, publish =>
         {
             publish.MessageId = request.EventId;
