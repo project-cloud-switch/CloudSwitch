@@ -16,11 +16,12 @@ public sealed class DeploymentService(
     UnitOfWork unitOfWork,
     ApprovedModules modules,
     IOptions<EndpointOptions> endpointOptions,
-    IOptions<AccessOptions> accessOptions)
+    IOptions<AccessOptions> accessOptions,
+    IOptions<SourceOptions> sources)
 {
     public async Task<Deployment> CreateAsync(DeploymentRequest request, CancellationToken cancellationToken)
     {
-        RequestValidation.ThrowIfInvalid(RequestValidation.Deployment(request, endpointOptions.Value));
+        RequestValidation.ThrowIfInvalid(RequestValidation.Deployment(request, endpointOptions.Value, sources.Value));
         var account = await accounts.GetAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
         var deployment = Deployment.Register(account.Id, request.Name, request.Definition.ToDomain(), now);
@@ -48,7 +49,7 @@ public sealed class DeploymentService(
     public async Task<Deployment> UpdateAsync(
         Guid id, DeploymentRequest request, long? expectedRevision, CancellationToken cancellationToken)
     {
-        RequestValidation.ThrowIfInvalid(RequestValidation.Deployment(request, endpointOptions.Value));
+        RequestValidation.ThrowIfInvalid(RequestValidation.Deployment(request, endpointOptions.Value, sources.Value));
         var account = await accounts.GetAsync(cancellationToken);
         await using var transaction = await unitOfWork.BeginDeploymentTransactionAsync(id, cancellationToken);
         var deployment = await ResourceAccess.DeploymentAsync(deployments, id, account.Id, cancellationToken);

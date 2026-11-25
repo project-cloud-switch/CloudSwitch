@@ -24,7 +24,8 @@ public sealed class JobSubmissionService(
     UnitOfWork unitOfWork,
     IPublishEndpoint publisher,
     ApprovedModules modules,
-    IOptions<AccessOptions> access)
+    IOptions<AccessOptions> access,
+    IOptions<SourceOptions> sources)
 {
     public async Task<SubmissionResult> SubmitAsync(SubmitJob command, CancellationToken ct)
     {
@@ -84,6 +85,16 @@ public sealed class JobSubmissionService(
         if (source.Provider == target.Configuration.Provider)
             throw Reject(RejectionKind.Conflict, "target_is_active", "Choose a target provider different from the currently active provider.");
 
+        if (sources.Value.Find(source.Provider) is null)
+            throw Reject(RejectionKind.Conflict, "unsupported_provider_combination",
+                "Migration from the active provider is not supported.");
+                
+        var activeIsOriginalSource = source.Provider == deployment.Definition.SourceProvider;
+        if (activeIsOriginalSource && deployment.Definition.SourceResource is null)
+            throw Reject(RejectionKind.Conflict, "source_identity_required",
+                "Update the deployment with its source resource before submitting a migration.");
+
+        source = source with { Resource = activeIsOriginalSource ? deployment.Definition.SourceResource : null };
         if (command.Trigger == JobTrigger.Automatic)
         {
             var health = await deployments.FindHealthAsync(deployment.Id, ct);

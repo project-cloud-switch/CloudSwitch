@@ -19,6 +19,14 @@ public sealed record DeploymentDefinitionDto
     public required TrafficConfiguration Traffic { get; init; }
     public RecoveryPolicy Recovery { get; init; } = new();
     public bool MonitoringEnabled { get; init; } = true;
+    public required SourceResourceDto? SourceResource { get; init; }
+}
+
+public sealed record SourceResourceDto
+{
+    public required string Type { get; init; }
+    public required string FolderId { get; init; }
+    public required string ResourceId { get; init; }
 }
 
 public sealed record TargetRequest

@@ -12,10 +12,11 @@ public sealed record DeploymentDefinition
     public TrafficConfiguration Traffic { get; }
     public RecoveryPolicy Recovery { get; }
     public bool MonitoringEnabled { get; }
+    public SourceResource? SourceResource { get; }
 
     public DeploymentDefinition(string environment, string sourceProvider, Uri sourceEndpoint,
         ApplicationConfiguration application, HealthCheckPolicy healthCheck, TrafficConfiguration traffic,
-        RecoveryPolicy? recovery = null, bool monitoringEnabled = true)
+        RecoveryPolicy? recovery = null, bool monitoringEnabled = true, SourceResource? sourceResource = null)
     {
         Environment = DomainGuard.Text(environment, nameof(Environment), 64);
         SourceProvider = DomainGuard.Text(sourceProvider, nameof(SourceProvider));
@@ -28,6 +29,7 @@ public sealed record DeploymentDefinition
         Traffic = traffic;
         Recovery = recovery ?? new RecoveryPolicy();
         MonitoringEnabled = monitoringEnabled;
+        SourceResource = sourceResource;
     }
 
     public bool AffectsObservations(DeploymentDefinition next)
@@ -42,7 +44,7 @@ public sealed record DeploymentDefinition
     public DeploymentDefinition WithMonitoring(
         HealthCheckPolicy healthCheck, RecoveryPolicy recovery, bool monitoringEnabled)
         => new(Environment, SourceProvider, SourceEndpoint, Application,
-            healthCheck, Traffic, recovery, monitoringEnabled);
+            healthCheck, Traffic, recovery, monitoringEnabled, SourceResource);
 }
 
 public sealed class Deployment
