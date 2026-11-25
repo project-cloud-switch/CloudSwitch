@@ -16,6 +16,18 @@ public sealed class DatabaseFactAttribute : FactAttribute
     }
 }
 
+public sealed class DatabaseTheoryAttribute : TheoryAttribute
+{
+    public DatabaseTheoryAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(
+            Environment.GetEnvironmentVariable("CLOUDSWITCH_TEST_POSTGRES")))
+        {
+            Skip = "Set CLOUDSWITCH_TEST_POSTGRES to run against an isolated PostgreSQL test database.";
+        }
+    }
+}
+
 [CollectionDefinition("PostgreSQL")]
 public sealed class DatabaseCollection : ICollectionFixture<DatabaseFixture>;
 

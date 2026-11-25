@@ -81,6 +81,8 @@ internal static partial class RequestValidation
             errors["inputs"] = ["Only inputs explicitly allowed by the selected module may be supplied."];
         if (!ValidSecrets(input.SecretReferences))
             errors["secretReferences"] = ["Use named vault://path#key references, never credential values."];
+        if (input.Inputs is { } values && values.Values.Any(value => value is not null && !ModuleInputValue().IsMatch(value ?? "")))
+            errors["inputs"] = ["Input values may contain only letters, digits, spaces and . _ : / @ + , = -."];
         return errors;
     }
 
@@ -134,4 +136,6 @@ internal static partial class RequestValidation
     [GeneratedRegex(@"\A[a-zA-Z0-9][a-zA-Z0-9._:/-]*(?:@sha256:[a-fA-F0-9]{64}|:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})\z")]
     private static partial Regex PinnedImage();
     private static bool SecretReference(string? value) => Domain.VaultReference.TryParse(value, out _);
+    [GeneratedRegex(@"\A[A-Za-z0-9 ._:/@+,=-]{0,1024}\z")]
+    private static partial Regex ModuleInputValue();
 }

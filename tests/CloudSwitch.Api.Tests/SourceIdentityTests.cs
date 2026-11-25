@@ -110,7 +110,7 @@ public sealed class SourceIdentityTests(DatabaseFixture fixture)
         Assert.Equal("fhm" + new string('b', 17), stored.Definition.SourceResource!.ResourceId);
     }
 
-    [Theory]
+    [DatabaseTheory]
     [InlineData("definition.application", "volumes")]
     [InlineData("definition.application", "persistentStorage")]
     [InlineData("definition", "database")]
