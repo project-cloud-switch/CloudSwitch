@@ -5,6 +5,9 @@ using CloudSwitch.Api.Contracts;
 using CloudSwitch.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace CloudSwitch.Api.Tests;
 
@@ -105,5 +108,40 @@ public sealed class SourceIdentityTests(DatabaseFixture fixture)
         await using var db = fixture.CreateDb();
         var stored = await db.Deployments.AsNoTracking().SingleAsync(x => x.Id == deployment.Id);
         Assert.Equal("fhm" + new string('b', 17), stored.Definition.SourceResource!.ResourceId);
+    }
+
+    [Theory]
+    [InlineData("definition.application", "volumes")]
+    [InlineData("definition.application", "persistentStorage")]
+    [InlineData("definition", "database")]
+    [InlineData("definition", "volumes")]
+    [InlineData("", "replicas")]
+    public async Task Unknown_fields_such_as_volumes_or_databases_are_rejected(string parent, string field)
+    {
+        using var client = Client();
+        var node = JsonSerializer.SerializeToNode(
+            PersistenceTests.Definition(await PersistenceTests.UserIdAsync(client)), new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        var target = parent.Split('.', StringSplitOptions.RemoveEmptyEntries).Aggregate(node, (current, name) => current[name]!);
+        target[field] = new JsonObject { ["name"] = "data", ["sizeGb"] = 10 };
+
+        using var content = new StringContent(node.ToJsonString(), Encoding.UTF8, "application/json");
+        using var response = await client.PostAsync("/api/v1/deployments", content);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [DatabaseFact]
+    public async Task Unknown_fields_are_rejected_for_targets_and_jobs_too()
+    {
+        using var client = Client();
+        var deployment = await PersistenceTests.CreateDeploymentAsync(client);
+        using var target = await client.PostAsync($"/api/v1/deployments/{deployment.Id}/targets", new StringContent(
+            """{"provider":"local","moduleId":"local-stateless-v1","script":"rm -rf /"}""", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, target.StatusCode);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/deployments/{deployment.Id}/jobs")
+        { Content = new StringContent($$"""{"targetConfigurationId":"{{Guid.NewGuid()}}","moduleSource":"git::evil"}""", Encoding.UTF8, "application/json") };
+        request.Headers.Add("Idempotency-Key", "unknown-field");
+        using var job = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.BadRequest, job.StatusCode);
     }
 }

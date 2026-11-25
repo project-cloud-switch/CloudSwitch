@@ -22,6 +22,8 @@ builder.Services.AddControllers(options =>
         options.Filters.Add(new ProducesResponseTypeAttribute(typeof(ProblemDetails), status, "application/problem+json"));
 });
 builder.Services.Configure<EndpointOptions>(builder.Configuration.GetSection("Endpoints"));
+builder.Services.Configure<JsonOptions>(options =>
+    options.JsonSerializerOptions.UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow);
 builder.Services.AddOptions<AccessOptions>().Bind(builder.Configuration.GetSection("Access")).ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<AccessOptions>, AccessOptionsValidator>();
 builder.Services.AddApiAuthentication(builder.Configuration, builder.Environment);
