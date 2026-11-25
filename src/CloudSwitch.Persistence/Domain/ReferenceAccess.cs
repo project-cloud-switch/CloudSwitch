@@ -1,4 +1,5 @@
 using CloudSwitch.Persistence.Domain;
+using Microsoft.Extensions.Options;
 
 namespace CloudSwitch.Persistence;
 
@@ -66,5 +67,35 @@ public static class ReferenceAccess
         list.AddRange(migration.Target.SecretReferences
             .Select(pair => ($"target.secretReferences.{pair.Key}", pair.Value)));
         return list;
+    }
+}
+
+public sealed class AccessOptionsValidator : IValidateOptions<AccessOptions>
+{
+    public ValidateOptionsResult Validate(string? name, AccessOptions options)
+    {
+        var failures = new List<string>();
+        var zones = new List<(string Zone, Guid User)>();
+        for (var i = 0; i < options.DnsZones.Count; i++)
+        {
+            var grant = options.DnsZones[i];
+            if (!DnsNames.TryCanonicalize(grant.Zone, out var zone))
+            {
+                failures.Add($"Access:DnsZones:{i}:Zone is not a valid DNS zone name.");
+                continue;
+            }
+            if (grant.UserIds.Count != 1 || grant.UserIds[0] == Guid.Empty)
+            {
+                failures.Add($"Access:DnsZones:{i}: grant the zone to exactly one user.");
+                continue;
+            }
+            zones.Add((zone, grant.UserIds[0]));
+        }
+        for (var i = 0; i < zones.Count; i++)
+            for (var j = i + 1; j < zones.Count; j++)
+                if (zones[i].User != zones[j].User
+                    && (DnsNames.IsInZone(zones[i].Zone, zones[j].Zone) || DnsNames.IsInZone(zones[j].Zone, zones[i].Zone)))
+                    failures.Add($"Zones '{zones[i].Zone}' and '{zones[j].Zone}' overlap and are granted to different users.");
+        return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
     }
 }
