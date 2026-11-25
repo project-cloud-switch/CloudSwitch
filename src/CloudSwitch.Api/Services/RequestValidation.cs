@@ -16,7 +16,7 @@ internal static partial class RequestValidation
             throw new RequestValidationException(errors);
     }
 
-    public static Dictionary<string, string[]> Deployment(DeploymentRequest input, EndpointOptions endpoints)
+    public static Dictionary<string, string[]> Deployment(DeploymentRequest input, EndpointOptions endpoints, SourceOptions sources)
     {
         var errors = new Dictionary<string, string[]>();
         Check(!string.IsNullOrWhiteSpace(input.Name) && input.Name.Length <= 120, "name", "A name of at most 120 characters is required.");
@@ -27,6 +27,17 @@ internal static partial class RequestValidation
         }
         Check(!string.IsNullOrWhiteSpace(definition.Environment) && definition.Environment.Length <= 64, "definition.environment", "Environment is required (maximum 64 characters).");
         Check(Identifier().IsMatch(definition.SourceProvider ?? ""), "definition.sourceProvider", "A provider identifier is required.");
+        var sourceRule = sources.Find(definition.SourceProvider);
+        Check(sourceRule is not null, "definition.sourceProvider", "The source provider is not supported.");
+        if (definition.SourceResource is not { } resource)
+            errors["definition.sourceResource"] = ["The source resource (type, folderId, resourceId) is required."];
+        else if (sourceRule is not null)
+        {
+            Check(resource.Type is not null && sourceRule.ResourceTypes.Contains(resource.Type), "definition.sourceResource.type",
+                "Use a resource type supported for this source provider.");
+            Check(sourceRule.IsValidId(resource.FolderId), "definition.sourceResource.folderId", "The folder identifier has an invalid format.");
+            Check(sourceRule.IsValidId(resource.ResourceId), "definition.sourceResource.resourceId", "The resource identifier has an invalid format.");
+        }
         Check(AllowedEndpoint(definition.SourceEndpoint, endpoints), "definition.sourceEndpoint", "Use an absolute HTTP(S) URL on an operator-approved host, without credentials, query or fragment.");
         if (definition.Application is not { } app)
             errors["definition.application"] = ["Application configuration is required."];
@@ -70,6 +81,8 @@ internal static partial class RequestValidation
             errors["inputs"] = ["Only inputs explicitly allowed by the selected module may be supplied."];
         if (!ValidSecrets(input.SecretReferences))
             errors["secretReferences"] = ["Use named vault://path#key references, never credential values."];
+        if (input.Inputs is { } values && values.Values.Any(value => value is not null && !ModuleInputValue().IsMatch(value ?? "")))
+            errors["inputs"] = ["Input values may contain only letters, digits, spaces and . _ : / @ + , = -."];
         return errors;
     }
 
@@ -123,4 +136,6 @@ internal static partial class RequestValidation
     [GeneratedRegex(@"\A[a-zA-Z0-9][a-zA-Z0-9._:/-]*(?:@sha256:[a-fA-F0-9]{64}|:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})\z")]
     private static partial Regex PinnedImage();
     private static bool SecretReference(string? value) => Domain.VaultReference.TryParse(value, out _);
+    [GeneratedRegex(@"\A[A-Za-z0-9 ._:/@+,=-]{0,1024}\z")]
+    private static partial Regex ModuleInputValue();
 }

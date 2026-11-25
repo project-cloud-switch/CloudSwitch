@@ -7,7 +7,6 @@ using CloudSwitch.Api.Authentication;
 using CloudSwitch.Contracts;
 using CloudSwitch.Persistence;
 using MassTransit.EntityFrameworkCoreIntegration;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -45,7 +44,11 @@ public sealed class PersistenceTests(DatabaseFixture fixture)
                 SecretReferences = new() { ["API_KEY"] = Secret(userId, "demo#api-key") }
             },
             HealthCheck = new HealthCheckPolicy { Path = "/health", IntervalSeconds = 10, TimeoutSeconds = 3, FailureThreshold = 3, RecoveryThreshold = 2 },
-            Traffic = new TrafficConfiguration { Driver = "simulation", RecordName = "app.example.test" }
+            Traffic = new TrafficConfiguration { Driver = "simulation", RecordName = "app.example.test" },
+            SourceResource = new SourceResourceDto
+            {
+                Type = "compute-instance", FolderId = "b1g" + new string('a', 17), ResourceId = "fhm" + new string('b', 17)
+            },
         }
     };
 

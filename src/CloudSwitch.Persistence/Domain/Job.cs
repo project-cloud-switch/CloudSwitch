@@ -7,7 +7,7 @@ public enum CutoverOutcome { NotStarted, Applied, Verified, Uncertain }
 public enum RecoveryMode { NotifyOnly, Automatic }
 public enum DeploymentHealthStatus { Unknown, Healthy, Unhealthy }
 
-public sealed record SourceDeploymentSnapshot(string Provider, Uri Endpoint, long RuntimeRevision);
+public sealed record SourceDeploymentSnapshot(string Provider, Uri Endpoint, long RuntimeRevision, SourceResource? Resource = null);
 
 public sealed record MigrationSpecification(long ConfigurationRevision, SourceDeploymentSnapshot Source,
     TargetConfigurationSnapshot Target, ApplicationConfiguration Application, HealthCheckPolicy TargetHealthCheck,
