@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 var migrateOnly = args.Contains("--migrate");
 var builder = WebApplication.CreateBuilder(args.Where(arg => arg != "--migrate").ToArray());
@@ -21,6 +22,8 @@ builder.Services.AddControllers(options =>
         options.Filters.Add(new ProducesResponseTypeAttribute(typeof(ProblemDetails), status, "application/problem+json"));
 });
 builder.Services.Configure<EndpointOptions>(builder.Configuration.GetSection("Endpoints"));
+builder.Services.AddOptions<AccessOptions>().Bind(builder.Configuration.GetSection("Access")).ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<AccessOptions>, AccessOptionsValidator>();
 builder.Services.AddApiAuthentication(builder.Configuration, builder.Environment);
 builder.Services.AddApiRateLimiting(builder.Configuration);
 builder.Services.AddApiInfrastructure(builder.Configuration);

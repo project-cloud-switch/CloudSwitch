@@ -1,6 +1,7 @@
 using CloudSwitch.Persistence.Domain;
 using MassTransit;
 using CloudSwitch.Persistence.Repositories;
+using Microsoft.Extensions.Options;
 
 namespace CloudSwitch.Persistence;
 
@@ -22,7 +23,8 @@ public sealed class JobSubmissionService(
     JobRepository jobs,
     UnitOfWork unitOfWork,
     IPublishEndpoint publisher,
-    ApprovedModules modules)
+    ApprovedModules modules,
+    IOptions<AccessOptions> access)
 {
     public async Task<SubmissionResult> SubmitAsync(SubmitJob command, CancellationToken ct)
     {
@@ -66,6 +68,14 @@ public sealed class JobSubmissionService(
         if (credentials.Any(reference => reference is not null && !reference.StartsWith("vault://", StringComparison.Ordinal)))
             throw Reject(RejectionKind.Conflict, "vault_reference_required", "Update legacy credential references to vault://path#key before submitting a new job.");
 
+        if (ReferenceAccess.FindDenied(deployment.UserId,
+            ReferenceAccess.Collect(deployment.Definition).Concat(ReferenceAccess.Collect(target.Configuration)),
+            deployment.Definition.Traffic, access.Value, "traffic") is not null)
+            {
+                throw Reject(RejectionKind.Conflict, "reference_access_denied",
+                    "A credential or DNS zone reference is not permitted for this account. Update the configuration before submitting.");
+            }
+            
         var runtime = await deployments.FindRuntimeAsync(deployment.Id, ct);
         var source = new SourceDeploymentSnapshot(
             runtime?.Provider ?? deployment.Definition.SourceProvider,

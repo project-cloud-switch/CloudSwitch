@@ -104,13 +104,14 @@ public sealed class MonitoringTests(DatabaseFixture fixture)
     public async Task Only_monitoring_fields_change()
     {
         using var client = Client();
+        var userId = await PersistenceTests.UserIdAsync(client);
         var deployment = await PersistenceTests.CreateDeploymentAsync(client);
 
         using var response = await PutMonitoringAsync(client, deployment.Id, 1,
             JsonContent.Create(Monitoring(path: "/ready")));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        var original = PersistenceTests.Definition();
+        var original = PersistenceTests.Definition(userId);
         await using var db = fixture.CreateDb();
         var stored = await db.Deployments.AsNoTracking().SingleAsync(x => x.Id == deployment.Id);
         Assert.Equal(original.Name, stored.Name);
