@@ -143,6 +143,28 @@ public sealed class MonitoringTests(DatabaseFixture fixture)
     }
 
     [DatabaseFact]
+    public async Task Incident_history_is_read_only_and_owner_only()
+    {
+        using var owner = Client();
+        using var stranger = Client();
+        var deployment = await PersistenceTests.CreateDeploymentAsync(owner);
+        var incidentId = await OpenIncidentAsync(deployment.Id);
+
+        var history = await owner.GetFromJsonAsync<List<IncidentResponse>>($"/api/v1/deployments/{deployment.Id}/incidents");
+        var incident = Assert.Single(history!);
+        Assert.Equal(incidentId, incident.Id);
+        Assert.Equal(deployment.Id, incident.DeploymentId);
+        Assert.Null(incident.ResolvedAt);
+
+        using var foreign = await stranger.GetAsync($"/api/v1/deployments/{deployment.Id}/incidents");
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+
+        using var anonymous = fixture.Factory.CreateClient();
+        using var unauthorized = await anonymous.GetAsync($"/api/v1/deployments/{deployment.Id}/incidents");
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
+    }
+
+    [DatabaseFact]
     public async Task Another_user_gets_not_found_and_anonymous_gets_unauthorized()
     {
         using var owner = Client();

@@ -1,3 +1,4 @@
+using CloudSwitch.Persistence.Diagnostics;
 using CloudSwitch.Worker.Orchestration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -12,7 +13,19 @@ public sealed class JobRecoveryService(IJobLeaseStore store, IMigrationOrchestra
     {
         var requests = await store.FindStaleJobsAsync(DateTimeOffset.UtcNow, 100, cancellationToken);
         foreach (var request in requests)
-            await orchestrator.ExecuteMigrationAsync(request, cancellationToken);
+        {
+            try
+            {
+                await orchestrator.ExecuteMigrationAsync(request, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception error)
+            {
+                logger.LogError(
+                    "Stale job recovery failed: job={JobId} correlation={CorrelationId} category={Category}.",
+                    request.JobId, request.CorrelationId, SafeDiagnostics.Categorize(error));
+            }
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -25,9 +38,11 @@ public sealed class JobRecoveryService(IJobLeaseStore store, IMigrationOrchestra
                 await RecoverStaleJobsAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
-            catch (Exception)
+            catch (Exception error)
             {
-                logger.LogError("Stale job recovery failed; it will retry on the next scan.");
+                logger.LogError(
+                    "Stale job recovery scan failed; it will retry on the next scan. category={Category}.",
+                    SafeDiagnostics.Categorize(error));
             }
         }
         while (await timer.WaitForNextTickAsync(stoppingToken));

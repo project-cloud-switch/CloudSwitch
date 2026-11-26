@@ -23,6 +23,8 @@ internal sealed class ApiOperationTransformer : IOpenApiOperationTransformer
             var media = content.Values.First();
             content.Clear();
             content["application/problem+json"] = media;
+            if (code == 400)
+                response.Description = "Validation failed. `code` is `validation_failed`; `errors` maps each field to its messages.";
         }
         return Task.CompletedTask;
     }

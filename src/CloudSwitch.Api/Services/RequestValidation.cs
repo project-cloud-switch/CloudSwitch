@@ -79,6 +79,8 @@ internal static partial class RequestValidation
             errors["moduleId"] = ["Select an approved module for this provider from /api/v1/modules."];
         if (!ValidMap(input.Inputs, 1024) || module is not null && input.Inputs.Keys.Except(module.AllowedInputs).Any())
             errors["inputs"] = ["Only inputs explicitly allowed by the selected module may be supplied."];
+        else if (module is not null && module.ValidateInputs(input.Inputs) is { } inputError)
+            errors["inputs"] = [inputError];
         if (!ValidSecrets(input.SecretReferences))
             errors["secretReferences"] = ["Use named vault://path#key references, never credential values."];
         if (input.Inputs is { } values && values.Values.Any(value => value is not null && !ModuleInputValue().IsMatch(value ?? "")))

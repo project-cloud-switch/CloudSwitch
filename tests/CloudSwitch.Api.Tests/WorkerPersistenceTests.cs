@@ -126,6 +126,39 @@ public sealed class WorkerPersistenceTests(DatabaseFixture fixture)
         }
     }
 
+    [DatabaseFact]
+    public async Task Unexpected_execution_failure_persists_only_safe_progress()
+    {
+        using var client = Client();
+        var request = await SubmitAsync(client);
+        var orchestrator = new MigrationOrchestrator(new SecretThrowingExecutor(), new DeterministicHealthValidator(),
+            new DeterministicTrafficRoutingService(), Store(), Options.Create(new WorkerOptions { Simulation = true }),
+            NullLogger<MigrationOrchestrator>.Instance, Options.Create(new AccessOptions()));
+        var outcome = await orchestrator.ExecuteMigrationAsync(request);
+        Assert.Equal("UNHANDLED_EXECUTION_ERROR", outcome.ErrorCode);
+
+        await using var db = fixture.CreateDb();
+        var job = await db.Jobs.SingleAsync(item => item.Id == request.JobId);
+        Assert.Equal("UNHANDLED_EXECUTION_ERROR", job.ErrorCode);
+        Assert.DoesNotContain(SecretThrowingExecutor.Secret, job.ErrorMessage);
+        var events = await db.JobEvents.Where(item => item.JobId == request.JobId).ToListAsync();
+        Assert.NotEmpty(events);
+        Assert.All(events, item => Assert.DoesNotContain(SecretThrowingExecutor.Secret, item.Event.ErrorMessage));
+
+        var history = await client.GetFromJsonAsync<List<JobStatusChanged>>($"/api/v1/jobs/{request.JobId}/events");
+        Assert.NotNull(history);
+        Assert.All(history, item => Assert.DoesNotContain(SecretThrowingExecutor.Secret, item.ErrorMessage));
+    }
+
+    private sealed class SecretThrowingExecutor : IInfrastructureExecutor
+    {
+        public const string Secret = "synthetic-db-password";
+        public Task<ProvisioningResult> ProvisionAsync(ProvisioningRequest request, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException($"database password='{Secret}'");
+        public Task<ReconciliationResult> ReconcileAsync(ReconciliationRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(ReconciliationResult.NotFound());
+    }
+
     private sealed class FailProgressSave : SaveChangesInterceptor
     {
         public override ValueTask<int> SavedChangesAsync(SaveChangesCompletedEventData eventData, int result,

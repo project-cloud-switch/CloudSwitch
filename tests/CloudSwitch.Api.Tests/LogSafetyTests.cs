@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
@@ -36,6 +37,8 @@ public sealed class LogSafetyTests(DatabaseFixture fixture)
         var logs = new SafeCapturingLoggerProvider();
         using var app = fixture.Factory.WithWebHostBuilder(builder =>
         {
+            builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
+                new Dictionary<string, string?> { ["Logging:LogLevel:Default"] = "Information" }));
             builder.ConfigureLogging(logging => logging.SetMinimumLevel(LogLevel.Information).AddProvider(logs));
             builder.ConfigureServices(services => services.AddDbContext<CloudSwitchDbContext>(
                 options => options.AddInterceptors(new LeakyFailure())));

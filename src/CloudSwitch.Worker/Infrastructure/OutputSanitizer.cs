@@ -17,7 +17,7 @@ public static partial class OutputSanitizer
     [GeneratedRegex(@"\beyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]*", RegexOptions.CultureInvariant, TimeoutMs)]
     private static partial Regex JsonWebToken();
 
-    [GeneratedRegex(@"\b(Proxy-Authorization|Authorization)\b\s*[:=]\s*[^\r\n]*",
+    [GeneratedRegex(@"\b(Proxy-Authorization|Authorization)\b\s*[:=]\s*(?:(Bearer|Basic|Token|Digest)\s+)?[^\r\n]*",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeoutMs)]
     private static partial Regex AuthorizationHeader();
 
@@ -33,8 +33,9 @@ public static partial class OutputSanitizer
     [GeneratedRegex(@"\bvault://\S*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeoutMs)]
     private static partial Regex VaultReference();
 
+    // The key part is bounded: an unbounded prefix made long benign output hit the regex timeout.
     [GeneratedRegex(
-        @"([""']?[\w\-.]*(?:password|passwd|pwd|secret|token|bearer|api[_-]?key|access[_-]?key|private[_-]?key|credentials?|cookie)[\w\-.]*[""']?\s*[:=]\s*)(""[^""\r\n]*""|'[^'\r\n]*'|[^\s,;&""']+)",
+        @"([""']?[\w\-.]{0,64}(?:password|passwd|pwd|secret|token|bearer|api[_-]?key|access[_-]?key|private[_-]?key|credentials?|cookie)[\w\-.]{0,64}[""']?\s*[:=]\s*)(""[^""\r\n]*""|'[^'\r\n]*'|[^\s,;&""']+)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeoutMs)]
     private static partial Regex KeyValueSecret();
 
@@ -57,12 +58,23 @@ public static partial class OutputSanitizer
 
             text = PrivateKeyBlock().Replace(text, RedactedMask);
             text = JsonWebToken().Replace(text, RedactedMask);
-            text = AuthorizationHeader().Replace(text, "$1: " + RedactedMask);
+            text = AuthorizationHeader().Replace(text, match =>
+            {
+                var scheme = match.Groups[2].Success ? match.Groups[2].Value + " " : "";
+                return $"{match.Groups[1].Value}: {scheme}{RedactedMask}";
+            });
             text = BearerToken().Replace(text, "Bearer " + RedactedMask);
             text = BasicCredentials().Replace(text, "Basic " + RedactedMask);
             text = UrlUserInfo().Replace(text, "$1" + RedactedMask + "@");
             text = VaultReference().Replace(text, "vault://" + RedactedMask);
-            text = KeyValueSecret().Replace(text, "$1" + RedactedMask);
+            text = KeyValueSecret().Replace(text, match =>
+            {
+                var value = match.Groups[2].Value;
+                var quote = value.Length > 0 && (value[0] == '"' || value[0] == '\'') ? value[0] : '\0';
+                return quote == '\0'
+                    ? match.Groups[1].Value + RedactedMask
+                    : match.Groups[1].Value + quote + RedactedMask + quote;
+            });
 
             text = ReplaceControlCharacters(text);
             return text.Length > maxLength ? string.Concat(text.AsSpan(0, maxLength), "... [TRUNCATED]") : text;

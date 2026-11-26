@@ -21,7 +21,11 @@ internal sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) :
         if (exception is RequestValidationException validation)
         {
             await Results.ValidationProblem(validation.Errors, title: validation.Message,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier })
+                extensions: new Dictionary<string, object?>
+                {
+                    ["code"] = "validation_failed",
+                    ["traceId"] = context.TraceIdentifier
+                })
                 .ExecuteAsync(context);
             return true;
         }

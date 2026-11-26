@@ -1,5 +1,7 @@
 using CloudSwitch.Contracts;
 using CloudSwitch.Contracts.Events;
+using CloudSwitch.Persistence;
+using CloudSwitch.Persistence.Diagnostics;
 using CloudSwitch.Worker.Infrastructure;
 using CloudSwitch.Worker.Recovery;
 using Microsoft.Extensions.Logging;
@@ -9,7 +11,7 @@ namespace CloudSwitch.Worker.Orchestration;
 
 public sealed class MigrationOrchestrator(IInfrastructureExecutor executor, ITargetHealthValidator healthValidator,
     ITrafficRoutingService routing, IJobLeaseStore store, IOptions<WorkerOptions> options,
-    ILogger<MigrationOrchestrator> logger) : IMigrationOrchestrator
+    ILogger<MigrationOrchestrator> logger, IOptions<AccessOptions>? access = null) : IMigrationOrchestrator
 {
     private readonly string workerId = $"{Environment.MachineName}:{Guid.NewGuid():N}";
 
@@ -65,6 +67,9 @@ public sealed class MigrationOrchestrator(IInfrastructureExecutor executor, ITar
                 return await FailAsync("MISSING_MIGRATION_SNAPSHOT", "A complete migration snapshot is required.");
             if (cutover is CutoverOutcome.Applied or CutoverOutcome.Uncertain)
                 return await FailAsync("UNCERTAIN_CUTOVER_STATE", "Interrupted traffic cutover requires manual reconciliation.");
+            if (ReferenceAccess.FindDenied(request.UserId, ReferenceAccess.Collect(specification), null,
+                    access?.Value ?? new AccessOptions(), "traffic") is not null)
+                return await FailAsync("REFERENCE_ACCESS_DENIED", "A frozen credential reference is no longer permitted for this account.");
             if (settings.Simulation && (specification.Provider != "local" || specification.TerraformModule != "local-stateless-v1:local-simulation-v1"))
                 return await FailAsync("SIMULATION_TARGET_REQUIRED", "Simulation accepts only the approved local target module.");
 
@@ -128,12 +133,16 @@ public sealed class MigrationOrchestrator(IInfrastructureExecutor executor, ITar
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception error) when (error is LeaseLostException || execution.IsCancellationRequested)
         {
-            logger.LogWarning("Execution stopped after losing the lease for JobId={JobId}.", request.JobId);
+            logger.LogWarning(
+                "Execution stopped after losing the lease for JobId={JobId} CorrelationId={CorrelationId}.",
+                request.JobId, request.CorrelationId);
             return MigrationOutcome.Failed(phase, "LEASE_LOST", "Job ownership changed; execution stopped.", sequence, endpoint?.ToString());
         }
-        catch (Exception)
+        catch (Exception error)
         {
-            logger.LogError("Unexpected migration failure for JobId={JobId} at Phase={Phase}.", request.JobId, phase);
+            logger.LogError(
+                "Unexpected migration failure for JobId={JobId} CorrelationId={CorrelationId} Phase={Phase} Category={Category}.",
+                request.JobId, request.CorrelationId, phase, SafeDiagnostics.Categorize(error));
             return await FailAsync("UNHANDLED_EXECUTION_ERROR", "An unexpected execution failure occurred. Diagnostics were redacted.");
         }
         finally
@@ -158,9 +167,11 @@ public sealed class MigrationOrchestrator(IInfrastructureExecutor executor, ITar
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
-        catch (Exception)
+        catch (Exception error)
         {
-            logger.LogWarning("Lease renewal failed for JobId={JobId}; execution is stopping.", lease.JobId);
+            logger.LogWarning(
+                "Lease renewal failed for JobId={JobId} CorrelationId={CorrelationId} Category={Category}; execution is stopping.",
+                lease.JobId, lease.Request.CorrelationId, SafeDiagnostics.Categorize(error));
             await execution.CancelAsync();
         }
     }

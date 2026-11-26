@@ -84,4 +84,12 @@ public sealed class DeploymentsController(DeploymentService service) : Controlle
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Health(Guid id, CancellationToken cancellationToken)
         => Ok(await service.GetHealthAsync(id, cancellationToken));
+
+    [HttpGet("{id:guid}/incidents", Name = "ListDeploymentIncidents")]
+    [ProducesResponseType<List<IncidentResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Incidents(Guid id, CancellationToken cancellationToken,
+        [FromQuery] int offset = 0, [FromQuery] int limit = 50)
+        => Ok(await service.ListIncidentsAsync(id, offset, limit, cancellationToken));
 }

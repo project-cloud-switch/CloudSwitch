@@ -93,6 +93,30 @@ public sealed class MigrationOrchestratorTests
     }
 
     [Fact]
+    public async Task Frozen_reference_outside_user_namespace_is_rejected_before_provisioning()
+    {
+        await using var context = await WorkerTestContext.StartAsync();
+        var request = WorkerTestContext.Request();
+        request = request with
+        {
+            Specification = request.Specification with
+            {
+                SecretReferences = new Dictionary<string, string>
+                {
+                    ["DB_PASSWORD"] = $"vault://users/{Guid.NewGuid():D}/db#password"
+                }
+            }
+        };
+        context.Store.RegisterJob(request);
+
+        var outcome = await context.Orchestrator(executor: new ThrowingExecutor()).ExecuteMigrationAsync(request);
+
+        Assert.Equal("REFERENCE_ACCESS_DENIED", outcome.ErrorCode);
+        Assert.DoesNotContain(context.Harness.Published.Select<JobStatusChanged>(),
+            item => item.Context.Message.Phase == MigrationPhase.Provisioning);
+    }
+
+    [Fact]
     public async Task Unexpected_exception_exposes_no_raw_secrets_in_events_or_logs()
     {
         await using var context = await WorkerTestContext.StartAsync();
