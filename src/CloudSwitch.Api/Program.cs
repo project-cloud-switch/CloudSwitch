@@ -8,10 +8,11 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using CloudSwitch.Persistence.Diagnostics;
 
 var migrateOnly = args.Contains("--migrate");
 var builder = WebApplication.CreateBuilder(args.Where(arg => arg != "--migrate").ToArray());
-
+builder.Logging.AddSafeConsole();
 builder.Services.AddProblemDetails(options =>
     options.CustomizeProblemDetails = context =>
         context.ProblemDetails.Extensions["traceId"] = context.HttpContext.TraceIdentifier);

@@ -1,4 +1,5 @@
 using CloudSwitch.Persistence;
+using CloudSwitch.Persistence.Diagnostics;
 using CloudSwitch.Api.Services;
 using CloudSwitch.Persistence.Domain;
 using Microsoft.AspNetCore.Diagnostics;
@@ -39,7 +40,16 @@ internal sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) :
             _ => (500, "internal_error", "An unexpected error occurred.")
         };
         if (status >= 500)
-            logger.LogError(exception, "API request failed with {ErrorCode}.", code);
+        {
+            var category = SafeDiagnostics.Categorize(exception);
+            var traceId = context.TraceIdentifier;
+            Guid? correlation = context.Request.Headers.TryGetValue("X-Correlation-ID", out var header)
+                && Guid.TryParse(header.ToString(), out var parsed) ? parsed : null;
+
+            logger.LogError(
+                "API request failed with {ErrorCode}: category={Category} status={Status} trace={TraceId} correlation={CorrelationId} details={Details}",
+                code, category, status, traceId, correlation, SafeDiagnostics.Describe(exception));
+        }
         await Results.Problem(statusCode: status, title: code, detail: detail,
             extensions: new Dictionary<string, object?> { ["code"] = code, ["traceId"] = context.TraceIdentifier })
             .ExecuteAsync(context);
