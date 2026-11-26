@@ -1,15 +1,17 @@
 using CloudSwitch.Contracts.Events;
+using CloudSwitch.Persistence.Diagnostics;
 using CloudSwitch.Worker.Orchestration;
 using MassTransit;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CloudSwitch.Worker.Consumers;
 
-/// <summary>
-/// MassTransit consumer for DeploymentRequested messages. Orchestrates target provisioning,
-/// health validation, traffic cutover, and entrypoint verification.
-/// </summary>
+public sealed class SafeConsumerFailureException(string category)
+    : Exception($"Migration job execution failed: {category}.")
+{
+    public string Category { get; } = category;
+}
+
 public sealed class DeploymentRequestedConsumer : IConsumer<DeploymentRequested>
 {
     private readonly IMigrationOrchestrator _orchestrator;
@@ -27,26 +29,47 @@ public sealed class DeploymentRequestedConsumer : IConsumer<DeploymentRequested>
     {
         var request = context.Message;
         _logger.LogInformation(
-            "Consuming DeploymentRequested for JobId={JobId}, DeploymentId={DeploymentId}, Trigger={Trigger}",
-            request.JobId, request.DeploymentId, request.Trigger);
+            "Consuming DeploymentRequested: job={JobId} deployment={DeploymentId} correlation={CorrelationId} trigger={Trigger}",
+            request.JobId, request.DeploymentId, request.CorrelationId, request.Trigger);
 
-        var outcome = await _orchestrator.ExecuteMigrationAsync(request, context.CancellationToken).ConfigureAwait(false);
+        try
+        {
+            var outcome = await _orchestrator.ExecuteMigrationAsync(request, context.CancellationToken).ConfigureAwait(false);
 
-        if (outcome.ErrorCode is "JOB_NOT_ACQUIRED" or "LEASE_LOST")
-        {
-            _logger.LogInformation("Skipped duplicate or stale execution for JobId={JobId}.", request.JobId);
+            if (outcome.ErrorCode is "JOB_NOT_ACQUIRED" or "LEASE_LOST")
+            {
+                _logger.LogInformation(
+                    "Skipped duplicate or stale execution: job={JobId} correlation={CorrelationId}",
+                    request.JobId, request.CorrelationId);
+            }
+            else if (outcome.IsSuccess)
+            {
+                _logger.LogInformation(
+                    "Migration succeeded: job={JobId} correlation={CorrelationId} target={TargetEndpoint} entrypoint={PublicEntrypoint}",
+                    request.JobId, request.CorrelationId, outcome.TargetEndpoint, outcome.PublicEntrypoint);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Migration failed: job={JobId} deployment={DeploymentId} correlation={CorrelationId} phase={Phase} code={ErrorCode}",
+                    request.JobId, request.DeploymentId, request.CorrelationId, outcome.FinalPhase, outcome.ErrorCode);
+            }
         }
-        else if (outcome.IsSuccess)
+        catch (OperationCanceledException)
         {
-            _logger.LogInformation(
-                "Migration Succeeded for JobId={JobId}. Target={TargetEndpoint}, Entrypoint={PublicEntrypoint}",
-                request.JobId, outcome.TargetEndpoint, outcome.PublicEntrypoint);
+            throw;
         }
-        else
+        catch (SafeConsumerFailureException)
         {
-            _logger.LogWarning(
-                "Migration Failed for JobId={JobId} at Phase={Phase} with Code={ErrorCode}: {ErrorMessage}",
-                request.JobId, outcome.FinalPhase, outcome.ErrorCode, outcome.ErrorMessage);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            var category = SafeDiagnostics.Categorize(exception);
+            _logger.LogError(
+                "Job execution threw: job={JobId} deployment={DeploymentId} correlation={CorrelationId} category={Category} details={Details}",
+                request.JobId, request.DeploymentId, request.CorrelationId, category, SafeDiagnostics.Describe(exception));
+            throw new SafeConsumerFailureException(category);
         }
     }
 }
