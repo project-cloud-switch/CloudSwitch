@@ -33,6 +33,16 @@ public sealed class DeploymentRepository(CloudSwitchDbContext db)
         => db.Incidents.AsNoTracking().SingleOrDefaultAsync(
             incident => incident.Id == incidentId && incident.DeploymentId == deploymentId, cancellationToken);
 
+    public Task<List<Incident>> ListIncidentsAsync(
+        Guid deploymentId, int offset, int limit, CancellationToken cancellationToken)
+        => db.Incidents.AsNoTracking()
+            .Where(incident => incident.DeploymentId == deploymentId)
+            .OrderByDescending(incident => incident.StartedAt)
+            .ThenBy(incident => incident.Id)
+            .Skip(offset)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+
     public void Add(Deployment deployment)
         => db.Deployments.Add(deployment);
 }

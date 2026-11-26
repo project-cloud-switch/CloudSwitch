@@ -76,6 +76,15 @@ public sealed class DeploymentService(
         await transaction.CommitAsync(cancellationToken);
     }
 
+    public async Task<List<IncidentResponse>> ListIncidentsAsync(
+        Guid id, int offset, int limit, CancellationToken cancellationToken)
+    {
+        ResourceAccess.Page(offset, limit);
+        await GetAsync(id, cancellationToken);
+        return (await deployments.ListIncidentsAsync(id, offset, limit, cancellationToken))
+            .Select(IncidentResponse.From).ToList();
+    }
+
     public async Task<DeploymentHealthResponse> GetHealthAsync(Guid id, CancellationToken cancellationToken)
     {
         var deployment = await GetAsync(id, cancellationToken);

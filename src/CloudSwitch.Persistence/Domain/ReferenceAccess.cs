@@ -55,6 +55,16 @@ public static class ReferenceAccess
     public static List<(string Field, string Reference)> Collect(TargetDefinition target)
         => target.SecretReferences.Select(pair => ($"secretReferences.{pair.Key}", pair.Value)).ToList();
 
+    /// <summary>References visible in the flat execution contract handed to Worker.</summary>
+    public static List<(string Field, string Reference)> Collect(CloudSwitch.Contracts.DeploymentSpecification specification)
+    {
+        var list = (specification.SecretReferences ?? new Dictionary<string, string>())
+            .Select(pair => ($"secretReferences.{pair.Key}", pair.Value)).ToList();
+        if (specification.ImagePullSecretReference is { } pull)
+            list.Add(("imagePullSecretReference", pull));
+        return list;
+    }
+
     /// <summary>The frozen references of a job. Worker calls this before resolving any secret.</summary>
     public static List<(string Field, string Reference)> Collect(MigrationSpecification migration)
     {

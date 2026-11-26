@@ -63,14 +63,14 @@ public sealed partial class DeterministicInfrastructureExecutor : IInfrastructur
         // 1. Validate Provider
         if (!ApprovedProviders.Contains(request.Provider))
         {
-            var msg = OutputSanitizer.Sanitize($"Provider '{request.Provider}' is not supported or approved.");
+            var msg = "The target provider is not supported or approved.";
             return Task.FromResult(ProvisioningResult.Failure("INVALID_PROVIDER", msg, TimeSpan.FromMilliseconds(50)));
         }
 
         // 2. Validate Terraform Module
         if (string.IsNullOrWhiteSpace(request.TerraformModule) || !ApprovedModules.Contains(request.TerraformModule))
         {
-            var msg = OutputSanitizer.Sanitize($"Module '{request.TerraformModule}' is not in the approved Terraform module allowlist.");
+            var msg = "The Terraform module is not in the approved allowlist.";
             return Task.FromResult(ProvisioningResult.Failure("INVALID_MODULE", msg, TimeSpan.FromMilliseconds(50)));
         }
 
@@ -129,7 +129,7 @@ public sealed partial class DeterministicInfrastructureExecutor : IInfrastructur
         }
 
         return Task.FromResult(ReconciliationResult.NotFound(
-            $"No existing target infrastructure found for deployment {request.DeploymentId} on provider {request.Provider}."));
+            "No existing target infrastructure was found for this deployment and provider."));
     }
     [GeneratedRegex(@"\A[a-zA-Z0-9][a-zA-Z0-9._:/-]*(?:@sha256:[a-fA-F0-9]{64}|:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})\z")]
     private static partial Regex PinnedImage();

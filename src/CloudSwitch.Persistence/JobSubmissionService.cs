@@ -60,7 +60,8 @@ public sealed class JobSubmissionService(
             ?? throw Reject(RejectionKind.NotFound, "target_not_found", "Target configuration was not found.");
         var approved = modules.Find(target.Configuration.ModuleId, target.Configuration.Provider);
         if (approved is null || approved.Source != target.Configuration.ModuleSource || approved.Revision != target.Configuration.ModuleRevision
-            || target.Configuration.Inputs.Keys.Except(approved.AllowedInputs).Any())
+            || target.Configuration.Inputs.Keys.Except(approved.AllowedInputs).Any()
+            || approved.ValidateInputs(target.Configuration.Inputs) is not null)
             throw Reject(RejectionKind.Conflict, "target_not_approved", "The target module is no longer approved. Update the target before submitting.");
 
         var credentials = deployment.Definition.Application.SecretReferences.Values
@@ -85,9 +86,13 @@ public sealed class JobSubmissionService(
         if (source.Provider == target.Configuration.Provider)
             throw Reject(RejectionKind.Conflict, "target_is_active", "Choose a target provider different from the currently active provider.");
 
-        if (sources.Value.Find(source.Provider) is null)
+        var sourceRule = sources.Value.Find(source.Provider);
+        if (sourceRule is null)
             throw Reject(RejectionKind.Conflict, "unsupported_provider_combination",
                 "Migration from the active provider is not supported.");
+        if (!sourceRule.AllowsTarget(target.Configuration.Provider))
+            throw Reject(RejectionKind.Conflict, "unsupported_provider_combination",
+                "Migration between the active source provider and the selected target provider is not supported.");
                 
         var activeIsOriginalSource = source.Provider == deployment.Definition.SourceProvider;
         if (activeIsOriginalSource && deployment.Definition.SourceResource is null)

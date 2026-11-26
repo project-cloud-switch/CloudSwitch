@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Npgsql;
 
 namespace CloudSwitch.Worker;
@@ -27,6 +28,8 @@ public static class DependencyInjection
             ?? throw new InvalidOperationException("RabbitMq configuration is required.");
         services.AddOptions<RabbitMqOptions>().Bind(configuration.GetSection("RabbitMq")).ValidateDataAnnotations().ValidateOnStart();
         services.AddOptions<WorkerOptions>().Bind(configuration.GetSection("Worker")).ValidateDataAnnotations().ValidateOnStart();
+        services.AddOptions<AccessOptions>().Bind(configuration.GetSection("Access")).ValidateOnStart();
+        services.AddSingleton<IValidateOptions<AccessOptions>, AccessOptionsValidator>();
         services.AddDbContext<CloudSwitchDbContext>(options => options.UseNpgsql(connection));
         services.AddSingleton<IInfrastructureExecutor, DeterministicInfrastructureExecutor>();
         services.AddSingleton<ITargetHealthValidator, DeterministicHealthValidator>();

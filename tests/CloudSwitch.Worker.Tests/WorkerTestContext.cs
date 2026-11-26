@@ -1,5 +1,6 @@
 using CloudSwitch.Contracts;
 using CloudSwitch.Contracts.Events;
+using CloudSwitch.Persistence;
 using CloudSwitch.Worker.Infrastructure;
 using CloudSwitch.Worker.Orchestration;
 using CloudSwitch.Worker.Recovery;
@@ -36,26 +37,32 @@ internal sealed class WorkerTestContext : IAsyncDisposable
     }
 
     public MigrationOrchestrator Orchestrator(IInfrastructureExecutor? executor = null, ITargetHealthValidator? health = null,
-        ITrafficRoutingService? routing = null, IJobLeaseStore? store = null, ILogger<MigrationOrchestrator>? logger = null)
+        ITrafficRoutingService? routing = null, IJobLeaseStore? store = null, ILogger<MigrationOrchestrator>? logger = null,
+        AccessOptions? access = null)
         => new(executor ?? Executor, health ?? new DeterministicHealthValidator(), routing ?? new DeterministicTrafficRoutingService(),
-            store ?? Store, Options.Create(new WorkerOptions()), logger ?? NullLogger<MigrationOrchestrator>.Instance);
+            store ?? Store, Options.Create(new WorkerOptions()), logger ?? NullLogger<MigrationOrchestrator>.Instance,
+            Options.Create(access ?? new AccessOptions()));
 
-    public static DeploymentRequested Request(Guid? deploymentId = null) => new()
+    public static DeploymentRequested Request(Guid? deploymentId = null)
     {
-        EventId = Guid.NewGuid(), CorrelationId = Guid.NewGuid(), OccurredAt = DateTimeOffset.UtcNow,
-        JobId = Guid.NewGuid(), DeploymentId = deploymentId ?? Guid.NewGuid(), UserId = Guid.NewGuid(),
-        Trigger = DeploymentTrigger.Automatic, IncidentId = Guid.NewGuid(),
-        Specification = new DeploymentSpecification
+        var userId = Guid.NewGuid();
+        return new DeploymentRequested
         {
-            Name = "payments", ContainerImage = "docker.io/myorg/pay@sha256:" + new string('a', 64),
-            Environment = "development", Provider = "selectel",
-            ContainerPort = 8080, CpuCores = 1, MemoryMb = 512,
-            TargetConfigurationId = Guid.NewGuid(), TerraformModule = "container-vm-selectel:v1.0.0",
-            SecretReferences = new Dictionary<string, string> { ["DB_PASSWORD"] = "vault://test/db#password" },
-            HealthCheck = new HealthCheckPolicy { Path = "/healthz", IntervalSeconds = 10, TimeoutSeconds = 3, FailureThreshold = 3, RecoveryThreshold = 2 },
-            EntrypointDomain = "pay.example.com", TrafficRoutingProvider = "simulation"
-        }
-    };
+            EventId = Guid.NewGuid(), CorrelationId = Guid.NewGuid(), OccurredAt = DateTimeOffset.UtcNow,
+            JobId = Guid.NewGuid(), DeploymentId = deploymentId ?? Guid.NewGuid(), UserId = userId,
+            Trigger = DeploymentTrigger.Automatic, IncidentId = Guid.NewGuid(),
+            Specification = new DeploymentSpecification
+            {
+                Name = "payments", ContainerImage = "docker.io/myorg/pay@sha256:" + new string('a', 64),
+                Environment = "development", Provider = "selectel",
+                ContainerPort = 8080, CpuCores = 1, MemoryMb = 512,
+                TargetConfigurationId = Guid.NewGuid(), TerraformModule = "container-vm-selectel:v1.0.0",
+                SecretReferences = new Dictionary<string, string> { ["DB_PASSWORD"] = $"vault://users/{userId:D}/db#password" },
+                HealthCheck = new HealthCheckPolicy { Path = "/healthz", IntervalSeconds = 10, TimeoutSeconds = 3, FailureThreshold = 3, RecoveryThreshold = 2 },
+                EntrypointDomain = "pay.example.com", TrafficRoutingProvider = "simulation"
+            }
+        };
+    }
 
     public ValueTask DisposeAsync() => provider.DisposeAsync();
 }

@@ -31,6 +31,26 @@ public sealed class SourceOptionsTests
         Assert.Null(options.Find("aws"));
         Assert.Null(options.Find("YANDEX"));
     }
+
+    [Fact]
+    public void Default_source_provider_limits_the_supported_target_providers()
+    {
+        var rule = new SourceOptions().Find("yandex")!;
+        Assert.True(rule.AllowsTarget("local"));
+        Assert.True(rule.AllowsTarget("selectel"));
+        Assert.False(rule.AllowsTarget("aws"));
+        Assert.False(rule.AllowsTarget(null));
+    }
+
+    [Fact]
+    public void Configured_rule_without_target_providers_allows_any_combination()
+    {
+        var options = new SourceOptions
+        {
+            Providers = [new SourceProviderRule { Provider = "custom" }]
+        };
+        Assert.True(options.Find("custom")!.AllowsTarget("anything"));
+    }
 }
 
 [Collection("PostgreSQL")]

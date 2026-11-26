@@ -53,6 +53,23 @@ public sealed class ModuleCatalogTests
         Assert.Throws<OptionsValidationException>(() => services.GetRequiredService<IOptions<ModuleCatalogOptions>>().Value);
     }
 
+    [Fact]
+    public void Module_validates_required_inputs_and_value_types()
+    {
+        var module = new ApprovedModule
+        {
+            Id = "stateless-v1", Provider = "local", Source = "modules/local/stateless", Revision = "v1",
+            AllowedInputs = ["region", "count", "enabled"],
+            RequiredInputs = ["region"],
+            InputTypes = new() { ["count"] = "integer", ["enabled"] = "boolean" }
+        };
+
+        Assert.NotNull(module.ValidateInputs(new Dictionary<string, string> { ["count"] = "2" }));
+        Assert.NotNull(module.ValidateInputs(new Dictionary<string, string> { ["region"] = "eu", ["count"] = "two" }));
+        Assert.NotNull(module.ValidateInputs(new Dictionary<string, string> { ["region"] = "eu", ["enabled"] = "yes" }));
+        Assert.Null(module.ValidateInputs(new Dictionary<string, string> { ["region"] = "eu", ["count"] = "2", ["enabled"] = "true" }));
+    }
+
     [Theory]
     [InlineData("[]")]
     [InlineData("null")]

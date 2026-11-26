@@ -7,6 +7,12 @@ namespace CloudSwitch.Api.Contracts;
 public sealed record DeploymentHealthResponse(Guid DeploymentId, string Provider, Uri Endpoint,
     DeploymentHealthStatus Status, long Sequence, Guid? IncidentId, DateTimeOffset? ObservedAt);
 
+public sealed record IncidentResponse(Guid Id, Guid DeploymentId, DateTimeOffset StartedAt, DateTimeOffset? ResolvedAt)
+{
+    public static IncidentResponse From(Domain.Incident incident)
+        => new(incident.Id, incident.DeploymentId, incident.StartedAt, incident.ResolvedAt);
+}
+
 public sealed record DeploymentResponse(Guid Id, Guid UserId, string Name, long Revision,
     DeploymentDefinitionDto Definition, bool IsDeleted, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt)
 {
